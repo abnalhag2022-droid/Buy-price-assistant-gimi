@@ -1,0 +1,89 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build:
+    name: Analyze, test, and build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Flutter stable
+        uses: flutter-actions/setup-flutter@v4
+        with:
+          channel: stable
+          version: 3.47.5
+          cache: true
+          cache-sdk: true
+
+      - name: Install SQLite libraries for desktop database tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-0 libsqlite3-dev
+
+      - name: Show toolchain versions
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      - name: Resolve dependencies (use committed lockfile when available)
+        run: |
+          if [ -f pubspec.lock ]; then
+            flutter pub get --enforce-lockfile
+          else
+            flutter pub get
+          fi
+
+      - name: Parse Dart sources
+        run: dart format --output=none lib test
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Run unit and SQLite data tests
+        run: flutter test --reporter expanded
+
+      - name: Generate Android platform files from the installed Flutter SDK
+        run: python3 tool/prepare_android.py
+
+      - name: Resolve final Android plugin metadata
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build release-mode test APK
+        run: flutter build apk --release
+
+      - name: Verify APK artifact exists
+        run: test -s build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buy-price-assistant-gimi-apk-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload resolved dependency lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-pubspec-lock-${{ github.run_number }}
+          path: pubspec.lock
+          if-no-files-found: error
+          retention-days: 14
