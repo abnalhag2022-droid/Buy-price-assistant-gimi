@@ -6,6 +6,7 @@ import '../utils/app_helpers.dart';
 import 'price_entry_form_screen.dart';
 import 'product_details_screen.dart';
 import 'product_form_screen.dart';
+import 'backup_restore_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -76,6 +77,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'النسخ الاحتياطي والاستعادة',
+            onPressed: () async {
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const BackupRestoreScreen()),
+              );
+              if (mounted) _reload();
+            },
+            icon: const Icon(Icons.backup_outlined),
+          ),
           IconButton(
             tooltip: 'إضافة صنف',
             onPressed: _addProduct,

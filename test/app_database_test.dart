@@ -71,4 +71,35 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+  test('backup round-trip preserves products and all price history', () async {
+    final id = await db.saveProduct(
+      name: 'لوح شمسي', code: 'PV-01', category: 'طاقة', unit: 'لوح',
+      brand: 'GIMI', notes: 'اختبار', isFavorite: true,
+    );
+    await db.recordPurchase(
+      productId: id, date: '2026-10-01', unitPrice: 100, quantity: 3,
+      supplier: 'المورد', invoiceNumber: 'INV-1', notes: 'شراء',
+    );
+    await db.recordSale(
+      productId: id, date: '2026-10-02', unitPrice: 150, quantity: 1,
+      customer: 'العميل', notes: 'بيع',
+    );
+    await db.archiveProduct(id);
+    final backup = await db.exportBackupJson();
+    await db.restoreBackupJson(backup);
+    expect(await db.getProduct(id), isNotNull);
+    expect(await db.getPurchaseHistory(id), hasLength(1));
+    expect(await db.getSaleHistory(id), hasLength(1));
+    expect((await db.getProduct(id))!['is_archived'], 1);
+  });
+
+  test('invalid backup does not delete existing data', () async {
+    final id = await db.saveProduct(name: 'بيانات محفوظة');
+    await expectLater(
+      db.restoreBackupJson('{"format":"wrong","schemaVersion":1,"tables":{}}'),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await db.getProduct(id), isNotNull);
+  });
+
 }

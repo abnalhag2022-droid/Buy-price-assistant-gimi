@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common/sqlite_api.dart';
@@ -280,6 +282,110 @@ class AppDatabase {
       FROM sale_entries WHERE product_id = ?
       ORDER BY sale_date DESC, id DESC
     ''', [productId]);
+  }
+
+  /// Exports all user data, including archived products and every price record.
+  Future<String> exportBackupJson() async {
+    final db = await database;
+    final products = await db.query('products', orderBy: 'id ASC');
+    final purchases = await db.query('purchase_entries', orderBy: 'id ASC');
+    final sales = await db.query('sale_entries', orderBy: 'id ASC');
+    final payload = <String, Object?>{
+      'format': 'buy_price_assistant_gimi_backup',
+      'schemaVersion': 1,
+      'createdAt': DateTime.now().toUtc().toIso8601String(),
+      'tables': <String, Object?>{
+        'products': products,
+        'purchase_entries': purchases,
+        'sale_entries': sales,
+      },
+      'counts': <String, int>{
+        'products': products.length,
+        'purchase_entries': purchases.length,
+        'sale_entries': sales.length,
+      },
+    };
+    return const JsonEncoder.withIndent('  ').convert(payload);
+  }
+
+  /// Replaces all local records atomically. Invalid backups leave existing data untouched.
+  Future<void> restoreBackupJson(String source) async {
+    final decoded = jsonDecode(source);
+    if (decoded is! Map<String, dynamic> ||
+        decoded['format'] != 'buy_price_assistant_gimi_backup' ||
+        decoded['schemaVersion'] != 1 ||
+        decoded['tables'] is! Map<String, dynamic>) {
+      throw const FormatException('ملف النسخة الاحتياطية غير معروف أو غير مدعوم.');
+    }
+
+    final tables = decoded['tables'] as Map<String, dynamic>;
+    const columns = <String, Set<String>>{
+      'products': {
+        'id', 'name', 'search_name', 'code', 'search_code', 'category',
+        'search_category', 'unit', 'brand', 'notes', 'is_favorite',
+        'is_archived', 'created_at', 'updated_at',
+      },
+      'purchase_entries': {
+        'id', 'product_id', 'purchase_date', 'unit_price', 'quantity',
+        'supplier', 'invoice_number', 'notes', 'created_at',
+      },
+      'sale_entries': {
+        'id', 'product_id', 'sale_date', 'unit_price', 'quantity',
+        'customer', 'notes', 'created_at',
+      },
+    };
+    const required = <String, Set<String>>{
+      'products': {
+        'id', 'name', 'search_name', 'search_code', 'search_category',
+        'unit', 'is_favorite', 'is_archived', 'created_at', 'updated_at',
+      },
+      'purchase_entries': {
+        'id', 'product_id', 'purchase_date', 'unit_price', 'quantity', 'created_at',
+      },
+      'sale_entries': {
+        'id', 'product_id', 'sale_date', 'unit_price', 'quantity', 'created_at',
+      },
+    };
+
+    final normalized = <String, List<Map<String, Object?>>>{};
+    for (final table in columns.keys) {
+      final rows = tables[table];
+      if (rows is! List) {
+        throw FormatException('بيانات الجدول $table غير موجودة في النسخة الاحتياطية.');
+      }
+      final cleanRows = <Map<String, Object?>>[];
+      for (final row in rows) {
+        if (row is! Map) {
+          throw FormatException('توجد بيانات غير صحيحة داخل الجدول $table.');
+        }
+        final item = Map<String, Object?>.from(row);
+        if (!columns[table]!.containsAll(item.keys) ||
+            !item.keys.toSet().containsAll(required[table]!)) {
+          throw FormatException('أعمدة الجدول $table لا تتوافق مع إصدار قاعدة البيانات.');
+        }
+        if (item['id'] is! int) {
+          throw FormatException('يوجد معرّف غير صحيح في الجدول $table.');
+        }
+        cleanRows.add(item);
+      }
+      normalized[table] = cleanRows;
+    }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('purchase_entries');
+      await txn.delete('sale_entries');
+      await txn.delete('products');
+      for (final row in normalized['products']!) {
+        await txn.insert('products', row);
+      }
+      for (final row in normalized['purchase_entries']!) {
+        await txn.insert('purchase_entries', row);
+      }
+      for (final row in normalized['sale_entries']!) {
+        await txn.insert('sale_entries', row);
+      }
+    });
   }
 
   Future<void> close() async {

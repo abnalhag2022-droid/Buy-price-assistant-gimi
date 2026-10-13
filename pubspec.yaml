@@ -1,7 +1,7 @@
 name: buy_price_assistant_gimi
 description: Arabic-first offline purchase and sales price history assistant.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.11.0 <4.0.0'
@@ -11,6 +11,7 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  file_picker: ^9.2.3
   intl: 0.20.3
   path: 1.9.1
   sqflite: 2.4.2
