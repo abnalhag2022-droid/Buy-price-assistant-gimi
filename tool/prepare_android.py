@@ -111,6 +111,41 @@ if (keystorePropertiesFile.exists()) {
     print(f"Configured release-signing support in {gradle_file.relative_to(ROOT)}.")
 
 
+
+def configure_compile_sdk() -> None:
+    """Ensure Android compiles against API 36 for current plugins."""
+    app_dir = ANDROID_DIR / "app"
+    kotlin = app_dir / "build.gradle.kts"
+    groovy = app_dir / "build.gradle"
+
+    if kotlin.is_file():
+        gradle_file = kotlin
+        patterns = [
+            (r"(?m)^([ \t]*)compileSdk\s*=\s*.+$", r"\1compileSdk = 36"),
+        ]
+    elif groovy.is_file():
+        gradle_file = groovy
+        patterns = [
+            (r"(?m)^([ \t]*)compileSdkVersion\s+.+$", r"\1compileSdkVersion 36"),
+            (r"(?m)^([ \t]*)compileSdk\s*=\s*.+$", r"\1compileSdk = 36"),
+            (r"(?m)^([ \t]*)compileSdk\s+.+$", r"\1compileSdk 36"),
+        ]
+    else:
+        raise SystemExit("لم يُعثر على ملف Gradle الخاص بتطبيق Android.")
+
+    content = gradle_file.read_text(encoding="utf-8")
+    for pattern, replacement in patterns:
+        updated, count = re.subn(pattern, replacement, content, count=1)
+        if count == 1:
+            gradle_file.write_text(updated, encoding="utf-8")
+            print(f"Android compile SDK set to API 36 in {gradle_file.name}.")
+            return
+
+    raise SystemExit(
+        f"لم أستطع تحديد إعداد compileSdk بأمان في {gradle_file.name}؛ أوقف البناء."
+    )
+
+
 def main() -> None:
     if not ANDROID_DIR.exists():
         with tempfile.TemporaryDirectory(prefix="buy-price-android-") as temp:
@@ -141,6 +176,7 @@ def main() -> None:
     if count != 1:
         raise SystemExit("Could not safely set the Android application label.")
     manifest.write_text(updated, encoding="utf-8")
+    configure_compile_sdk()
     configure_gradle_signing()
     print("Android scaffolding and signing support are ready.")
 
