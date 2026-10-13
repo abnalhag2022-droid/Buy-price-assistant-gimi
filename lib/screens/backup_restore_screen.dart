@@ -30,7 +30,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       final now = DateTime.now();
       final stamp = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
           '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-      final output = await FilePicker.platform.saveFile(
+      final output = await FilePicker.saveFile(
         dialogTitle: 'حفظ النسخة الاحتياطية',
         fileName: 'gimi_backup_$stamp.json',
         type: FileType.custom,
@@ -74,7 +74,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     if (!await _confirmRestore() || !mounted) return;
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['json'],
         allowMultiple: false,
