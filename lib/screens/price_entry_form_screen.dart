@@ -162,10 +162,10 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
                 subtitle: Text(appTextValue(
                   widget.entry == null
                       ? (isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات')
-                      : 'سيتم تحديث هذه العملية في سجل ' + (isPurchase ? 'المشتريات' : 'المبيعات'),
+                      : 'سيتم تحديث هذه العملية في سجل ${isPurchase ? 'المشتريات' : 'المبيعات'}',
                   widget.entry == null
                       ? (isPurchase ? 'This price will be saved in purchase history' : 'This price will be saved in sales history')
-                      : 'This transaction will be updated in ' + (isPurchase ? 'purchase' : 'sales') + ' history',
+                      : 'This transaction will be updated in ${isPurchase ? 'purchase' : 'sales'} history',
                 )),
               ),
             ),
