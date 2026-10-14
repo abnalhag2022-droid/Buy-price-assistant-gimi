@@ -98,16 +98,20 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
+
           def esc(s):
               out = []
               for i, ch in enumerate(s):
-                  if ch == '\\\\': out.append('\\\\')
-                  elif ch == '\\t': out.append('\\\\t')
-                  elif ch == '\\n': out.append('\\\\n')
-                  elif ch == '\\r': out.append('\\\\r')
-                  elif ch in '=:#!' or (ch == ' ' and i == 0): out.append('\\\\' + ch)
-                  else: out.append(ch)
+                  if ch == '\\': out.append('\\\\')
+                  elif ch == '\t': out.append('\\t')
+                  elif ch == '\n': out.append('\\n')
+                  elif ch == '\r': out.append('\\r')
+                  elif ch in '=:#!' or (ch == ' ' and i == 0):
+                      out.append('\\' + ch)
+                  else:
+                      out.append(ch)
               return ''.join(out)
+
           values = {
               "storePassword": os.environ["ANDROID_KEYSTORE_PASSWORD"],
               "keyPassword": os.environ["ANDROID_KEY_PASSWORD"],
@@ -115,7 +119,10 @@ jobs:
               "storeFile": os.environ["KEYSTORE_PATH"],
           }
           target = Path("android/key.properties")
-          target.write_text(''.join(f"{k}={esc(v)}\\n" for k, v in values.items()), encoding="utf-8")
+          target.write_text(
+              ''.join(f"{k}={esc(v)}\n" for k, v in values.items()),
+              encoding="utf-8",
+          )
           PY
 
           # Validate the keystore/alias/password before starting the expensive build.
