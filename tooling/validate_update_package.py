@@ -37,7 +37,7 @@ def main() -> int:
     settings_tests = source("test/app_settings_test.dart")
     migration_tests = source("test/database_migration_test.dart")
 
-    require(bool(re.search(r"(?m)^version:\s*1\.1\.0\+3\s*$", pubspec)), "version is 1.1.0+3")
+    require(bool(re.search(r"(?m)^version:\s*1\.2\.0\+4\s*$", pubspec)), "version is 1.2.0+4")
     require("shared_preferences: ^2.5.6" in pubspec, "persistent settings dependency is declared")
     require("static const _databaseVersion = 2;" in database and "onUpgrade: _upgradeSchema" in database, "database v1-to-v2 migration is wired")
     require("currency_code TEXT NOT NULL DEFAULT 'YER'" in database, "new currency column defaults legacy records to YER")

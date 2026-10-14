@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/app_database.dart';
+import '../models/price_entry.dart';
 import '../utils/app_helpers.dart';
 import '../state/app_settings.dart';
 import '../utils/app_text.dart';
 
 class PriceEntryFormScreen extends StatefulWidget {
-  const PriceEntryFormScreen({super.key, required this.productId, required this.productName, required this.isPurchase});
+  const PriceEntryFormScreen({super.key, required this.productId, required this.productName, required this.isPurchase, this.entry});
 
   final int productId;
   final String productName;
   final bool isPurchase;
+  final PriceEntry? entry;
 
   @override
   State<PriceEntryFormScreen> createState() => _PriceEntryFormScreenState();
@@ -27,6 +29,21 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   DateTime _date = DateTime.now();
   bool _saving = false;
   String _currency = AppSettings.instance.currency;
+
+  @override
+  void initState() {
+    super.initState();
+    final entry = widget.entry;
+    if (entry != null) {
+      _price.text = entry.unitPrice.toString();
+      _quantity.text = entry.quantity.toString();
+      _party.text = entry.partyName ?? '';
+      _invoice.text = entry.invoiceNumber ?? '';
+      _notes.text = entry.notes ?? '';
+      _date = DateTime.parse(entry.date);
+      _currency = entry.currencyCode;
+    }
+  }
 
   @override
   void dispose() {
@@ -68,7 +85,33 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
     final quantity = parseLocalizedNumber(_quantity.text)!;
     try {
       final date = toIsoDate(_date);
-      if (widget.isPurchase) {
+      final entry = widget.entry;
+      if (entry != null) {
+        if (widget.isPurchase) {
+          await AppDatabase.instance.updatePurchaseEntry(
+            id: entry.id,
+            productId: widget.productId,
+            date: date,
+            unitPrice: price,
+            quantity: quantity,
+            supplier: _party.text,
+            invoiceNumber: _invoice.text,
+            notes: _notes.text,
+            currencyCode: _currency,
+          );
+        } else {
+          await AppDatabase.instance.updateSaleEntry(
+            id: entry.id,
+            productId: widget.productId,
+            date: date,
+            unitPrice: price,
+            quantity: quantity,
+            customer: _party.text,
+            notes: _notes.text,
+            currencyCode: _currency,
+          );
+        }
+      } else if (widget.isPurchase) {
         await AppDatabase.instance.recordPurchase(
           productId: widget.productId,
           date: date,
@@ -93,7 +136,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تسجيل العملية: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(appTextValue(widget.entry == null ? 'تعذر تسجيل العملية: ' : 'تعذر تعديل العملية: ', widget.entry == null ? 'Could not save transaction: ' : 'Could not update transaction: ') + error.toString())));
         setState(() => _saving = false);
       }
     }
@@ -102,7 +145,9 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isPurchase = widget.isPurchase;
-    final title = appTextValue(isPurchase ? 'تسجيل عملية شراء' : 'تسجيل عملية بيع', isPurchase ? 'Record purchase' : 'Record sale');
+    final title = widget.entry == null
+        ? appTextValue(isPurchase ? 'تسجيل عملية شراء' : 'تسجيل عملية بيع', isPurchase ? 'Record purchase' : 'Record sale')
+        : appTextValue(isPurchase ? 'تعديل عملية شراء' : 'تعديل عملية بيع', isPurchase ? 'Edit purchase transaction' : 'Edit sale transaction');
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: Form(
@@ -114,7 +159,14 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
               child: ListTile(
                 leading: CircleAvatar(child: Icon(isPurchase ? Icons.shopping_cart_outlined : Icons.sell_outlined)),
                 title: Text(widget.productName, style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(appTextValue(isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات', isPurchase ? 'This price will be saved in purchase history' : 'This price will be saved in sales history')),
+                subtitle: Text(appTextValue(
+                  widget.entry == null
+                      ? (isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات')
+                      : 'سيتم تحديث هذه العملية في سجل ' + (isPurchase ? 'المشتريات' : 'المبيعات'),
+                  widget.entry == null
+                      ? (isPurchase ? 'This price will be saved in purchase history' : 'This price will be saved in sales history')
+                      : 'This transaction will be updated in ' + (isPurchase ? 'purchase' : 'sales') + ' history',
+                )),
               ),
             ),
             const SizedBox(height: 14),
@@ -165,7 +217,10 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
             FilledButton.icon(
               onPressed: _saving ? null : _save,
               icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-              label: AppText(ar: _saving ? 'جارٍ الحفظ...' : 'حفظ العملية', en: _saving ? 'Saving...' : 'Save transaction'),
+              label: AppText(
+                ar: _saving ? 'جارٍ الحفظ...' : (widget.entry == null ? 'حفظ العملية' : 'حفظ التعديلات'),
+                en: _saving ? 'Saving...' : (widget.entry == null ? 'Save transaction' : 'Save changes'),
+              ),
             ),
           ],
         ),

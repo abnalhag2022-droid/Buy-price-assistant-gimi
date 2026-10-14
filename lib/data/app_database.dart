@@ -305,6 +305,99 @@ class AppDatabase {
     });
   }
 
+
+  /// Updates one purchase record while preserving its ID and created_at.
+  Future<void> updatePurchaseEntry({
+    required int id,
+    required int productId,
+    required String date,
+    required double unitPrice,
+    required double quantity,
+    String? supplier,
+    String? invoiceNumber,
+    String? notes,
+    String currencyCode = 'YER',
+  }) async {
+    _validateEntry(date: date, price: unitPrice, quantity: quantity);
+    await _updateHistoryEntry('purchase_entries', id: id, productId: productId, values: {
+      'purchase_date': date,
+      'unit_price': unitPrice,
+      'currency_code': _validatedCurrency(currencyCode),
+      'quantity': quantity,
+      'supplier': _nullableTrim(supplier),
+      'invoice_number': _nullableTrim(invoiceNumber),
+      'notes': _nullableTrim(notes),
+    });
+  }
+
+  /// Updates one sale record while preserving its ID and created_at.
+  Future<void> updateSaleEntry({
+    required int id,
+    required int productId,
+    required String date,
+    required double unitPrice,
+    required double quantity,
+    String? customer,
+    String? notes,
+    String currencyCode = 'YER',
+  }) async {
+    _validateEntry(date: date, price: unitPrice, quantity: quantity);
+    await _updateHistoryEntry('sale_entries', id: id, productId: productId, values: {
+      'sale_date': date,
+      'unit_price': unitPrice,
+      'currency_code': _validatedCurrency(currencyCode),
+      'quantity': quantity,
+      'customer': _nullableTrim(customer),
+      'notes': _nullableTrim(notes),
+    });
+  }
+
+  Future<void> deletePurchaseEntry({required int id, required int productId}) =>
+      _deleteHistoryEntry('purchase_entries', id: id, productId: productId);
+
+  Future<void> deleteSaleEntry({required int id, required int productId}) =>
+      _deleteHistoryEntry('sale_entries', id: id, productId: productId);
+
+  Future<void> _updateHistoryEntry(
+    String table, {
+    required int id,
+    required int productId,
+    required Map<String, Object?> values,
+  }) async {
+    if (table != 'purchase_entries' && table != 'sale_entries') {
+      throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');
+    }
+    final db = await database;
+    final count = await db.update(
+      table,
+      values,
+      where: 'id = ? AND product_id = ?',
+      whereArgs: [id, productId],
+    );
+    if (count == 0) {
+      throw StateError('لم يتم العثور على العملية المطلوبة لتعديلها.');
+    }
+  }
+
+  Future<void> _deleteHistoryEntry(
+    String table, {
+    required int id,
+    required int productId,
+  }) async {
+    if (table != 'purchase_entries' && table != 'sale_entries') {
+      throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');
+    }
+    final db = await database;
+    final count = await db.delete(
+      table,
+      where: 'id = ? AND product_id = ?',
+      whereArgs: [id, productId],
+    );
+    if (count == 0) {
+      throw StateError('لم يتم العثور على العملية المطلوبة لحذفها.');
+    }
+  }
+
   Future<int> _recordEntry(String table, Map<String, Object?> values) async {
     if (table != 'purchase_entries' && table != 'sale_entries') {
       throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');

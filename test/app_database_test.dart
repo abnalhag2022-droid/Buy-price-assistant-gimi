@@ -138,4 +138,85 @@ void main() {
     expect((await db.getPurchaseHistory(id)).single['currency_code'], 'YER');
   });
 
+
+  test('edits purchase and sale history entries without replacing their IDs', () async {
+    final productId = await db.saveProduct(name: 'صنف اختبار تعديل السجل');
+    final purchaseId = await db.recordPurchase(
+      productId: productId, date: '2026-10-01', unitPrice: 100,
+      quantity: 2, supplier: 'مورد قديم', invoiceNumber: 'INV-1',
+      notes: 'قديم', currencyCode: 'YER',
+    );
+    final oldPurchaseCreatedAt = (await db.getPurchaseHistory(productId)).single['created_at'];
+
+    await db.updatePurchaseEntry(
+      id: purchaseId, productId: productId, date: '2026-10-03',
+      unitPrice: 125.5, quantity: 4, supplier: 'مورد جديد',
+      invoiceNumber: 'INV-2', notes: 'معدل', currencyCode: 'USD',
+    );
+    final purchase = (await db.getPurchaseHistory(productId)).single;
+    expect(purchase['id'], purchaseId);
+    expect(purchase['entry_date'], '2026-10-03');
+    expect(purchase['unit_price'], 125.5);
+    expect(purchase['quantity'], 4.0);
+    expect(purchase['party_name'], 'مورد جديد');
+    expect(purchase['invoice_number'], 'INV-2');
+    expect(purchase['notes'], 'معدل');
+    expect(purchase['currency_code'], 'USD');
+    expect(purchase['created_at'], oldPurchaseCreatedAt);
+
+    final saleId = await db.recordSale(
+      productId: productId, date: '2026-10-02', unitPrice: 160,
+      quantity: 1, customer: 'عميل قديم', notes: 'قديم',
+      currencyCode: 'YER',
+    );
+    final oldSaleCreatedAt = (await db.getSaleHistory(productId)).single['created_at'];
+    await db.updateSaleEntry(
+      id: saleId, productId: productId, date: '2026-10-04',
+      unitPrice: 175, quantity: 3, customer: 'عميل جديد',
+      notes: 'معدل', currencyCode: 'SAR',
+    );
+    final sale = (await db.getSaleHistory(productId)).single;
+    expect(sale['id'], saleId);
+    expect(sale['entry_date'], '2026-10-04');
+    expect(sale['unit_price'], 175.0);
+    expect(sale['quantity'], 3.0);
+    expect(sale['party_name'], 'عميل جديد');
+    expect(sale['notes'], 'معدل');
+    expect(sale['currency_code'], 'SAR');
+    expect(sale['created_at'], oldSaleCreatedAt);
+  });
+
+  test('deletes only the selected purchase or sale history entry', () async {
+    final productId = await db.saveProduct(name: 'صنف اختبار حذف السجل');
+    final otherProductId = await db.saveProduct(name: 'صنف مختلف');
+    final oldPurchaseId = await db.recordPurchase(
+      productId: productId, date: '2026-10-01', unitPrice: 50, quantity: 1,
+    );
+    final latestPurchaseId = await db.recordPurchase(
+      productId: productId, date: '2026-10-02', unitPrice: 60, quantity: 2,
+    );
+    final oldSaleId = await db.recordSale(
+      productId: productId, date: '2026-10-01', unitPrice: 70, quantity: 1,
+    );
+    final latestSaleId = await db.recordSale(
+      productId: productId, date: '2026-10-02', unitPrice: 80, quantity: 2,
+    );
+
+    await expectLater(
+      db.deletePurchaseEntry(id: latestPurchaseId, productId: otherProductId),
+      throwsA(isA<StateError>()),
+    );
+    expect(await db.getPurchaseHistory(productId), hasLength(2));
+
+    await db.deletePurchaseEntry(id: latestPurchaseId, productId: productId);
+    await db.deleteSaleEntry(id: latestSaleId, productId: productId);
+    expect((await db.getPurchaseHistory(productId)).map((e) => e['id']).toList(), [oldPurchaseId]);
+    expect((await db.getSaleHistory(productId)).map((e) => e['id']).toList(), [oldSaleId]);
+
+    await db.deletePurchaseEntry(id: oldPurchaseId, productId: productId);
+    await db.deleteSaleEntry(id: oldSaleId, productId: productId);
+    expect(await db.getPurchaseHistory(productId), isEmpty);
+    expect(await db.getSaleHistory(productId), isEmpty);
+  });
+
 }

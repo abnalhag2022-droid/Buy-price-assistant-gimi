@@ -62,6 +62,81 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     if (saved == true && mounted) await _load();
   }
 
+
+  Future<void> _editHistoryEntry(PriceEntry entry, {required bool purchase}) async {
+    final product = _product;
+    if (product == null) return;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PriceEntryFormScreen(
+          productId: product.id,
+          productName: product.name,
+          isPurchase: purchase,
+          entry: entry,
+        ),
+      ),
+    );
+    if (saved == true && mounted) await _load();
+  }
+
+  Future<void> _deleteHistoryEntry(PriceEntry entry, {required bool purchase}) async {
+    final product = _product;
+    if (product == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(appTextValue('تأكيد حذف العملية', 'Confirm transaction deletion')),
+        content: Text(appTextValue(
+          'سيتم حذف هذه العملية من السجل نهائيًا، ولا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
+          'This transaction will be permanently deleted and cannot be recovered. Continue?',
+        )),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const AppText(ar: 'إلغاء', en: 'Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const AppText(ar: 'حذف العملية', en: 'Delete transaction'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      if (purchase) {
+        await AppDatabase.instance.deletePurchaseEntry(
+          id: entry.id,
+          productId: product.id,
+        );
+      } else {
+        await AppDatabase.instance.deleteSaleEntry(
+          id: entry.id,
+          productId: product.id,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(appTextValue('تم حذف العملية.', 'Transaction deleted.'))),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            appTextValue('تعذر حذف العملية: ', 'Could not delete transaction: ') +
+                error.toString(),
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _editProduct() async {
     final product = _product;
     if (product == null) return;
@@ -152,9 +227,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               Expanded(child: FilledButton.tonalIcon(onPressed: () => _addEntry(purchase: false), icon: const Icon(Icons.point_of_sale_outlined), label: const AppText(ar: 'إضافة بيع', en: 'Add sale'))),
             ]),
             const SizedBox(height: 20),
-            _HistorySection(title: appTextValue('سجل المشتريات', 'Purchase history'), icon: Icons.shopping_cart_outlined, entries: _purchases, isPurchase: true, unit: product.unit),
+            _HistorySection(title: appTextValue('سجل المشتريات', 'Purchase history'), icon: Icons.shopping_cart_outlined, entries: _purchases, isPurchase: true, unit: product.unit, onEdit: (entry) => _editHistoryEntry(entry, purchase: true), onDelete: (entry) => _deleteHistoryEntry(entry, purchase: true)),
             const SizedBox(height: 14),
-            _HistorySection(title: appTextValue('سجل المبيعات', 'Sales history'), icon: Icons.sell_outlined, entries: _sales, isPurchase: false, unit: product.unit),
+            _HistorySection(title: appTextValue('سجل المبيعات', 'Sales history'), icon: Icons.sell_outlined, entries: _sales, isPurchase: false, unit: product.unit, onEdit: (entry) => _editHistoryEntry(entry, purchase: false), onDelete: (entry) => _deleteHistoryEntry(entry, purchase: false)),
           ],
         ),
       ),
@@ -202,12 +277,14 @@ class _CurrentPrice extends StatelessWidget {
 }
 
 class _HistorySection extends StatelessWidget {
-  const _HistorySection({required this.title, required this.icon, required this.entries, required this.isPurchase, required this.unit});
+  const _HistorySection({required this.title, required this.icon, required this.entries, required this.isPurchase, required this.unit, required this.onEdit, required this.onDelete});
   final String title;
   final IconData icon;
   final List<PriceEntry> entries;
   final bool isPurchase;
   final String unit;
+  final Future<void> Function(PriceEntry entry) onEdit;
+  final Future<void> Function(PriceEntry entry) onDelete;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -232,7 +309,38 @@ class _HistorySection extends StatelessWidget {
                         if ((entry.notes ?? '').isNotEmpty) Text(appTextValue('ملاحظة: ${entry.notes}', 'Note: ${entry.notes}'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ])),
                       const SizedBox(width: 8),
-                      Text('${formatMoney(entry.unitPrice)} ${currencyLabel(context, entry.currencyCode)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('${formatMoney(entry.unitPrice)} ${currencyLabel(context, entry.currencyCode)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                          PopupMenuButton<String>(
+                            tooltip: appTextValue('إجراءات العملية', 'Transaction actions'),
+                            icon: const Icon(Icons.more_horiz),
+                            onSelected: (action) {
+                              if (action == 'edit') onEdit(entry);
+                              if (action == 'delete') onDelete(entry);
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem<String>(
+                                value: 'edit',
+                                child: Row(children: [
+                                  const Icon(Icons.edit_outlined, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(appTextValue('تعديل العملية', 'Edit transaction')),
+                                ]),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                child: Row(children: [
+                                  Icon(Icons.delete_outline, size: 20, color: Theme.of(context).colorScheme.error),
+                                  const SizedBox(width: 8),
+                                  Text(appTextValue('حذف العملية', 'Delete transaction')),
+                                ]),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ]),
                   )),
           ]),
