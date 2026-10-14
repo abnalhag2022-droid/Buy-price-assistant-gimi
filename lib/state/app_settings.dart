@@ -179,8 +179,8 @@ class AppSettings extends ChangeNotifier {
       'language': language,
       'theme': theme,
       'currency': currency,
-      'categories': (categories as List).cast<String>(),
-      'units': (units as List).cast<String>(),
+      'categories': categories.cast<String>(),
+      'units': units.cast<String>(),
     };
   }
 

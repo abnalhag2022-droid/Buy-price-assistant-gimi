@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     return _MessageState(
                       icon: Icons.error_outline,
                       title: appTextValue('تعذر تحميل الأصناف', 'Could not load items'),
-                      message: appTextValue('تحقق من سلامة البيانات ثم أعد المحاولة.', 'Check your data and try again.') + '\n${snapshot.error}',
+                      message: '${appTextValue('تحقق من سلامة البيانات ثم أعد المحاولة.', 'Check your data and try again.')}\n${snapshot.error}',
                       actionLabel: appTextValue('إعادة المحاولة', 'Retry'),
                       onAction: () => _reload(),
                     );

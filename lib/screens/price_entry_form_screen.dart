@@ -136,7 +136,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _currency,
+              initialValue: _currency,
               decoration: InputDecoration(labelText: appTextValue('عملة العملية', 'Transaction currency')),
               items: const [
                 DropdownMenuItem(value: 'USD', child: Text('USD — US Dollar')),

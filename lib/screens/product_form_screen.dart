@@ -273,7 +273,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _selectedCategory ?? '',
+                      initialValue: _selectedCategory ?? '',
                       decoration: InputDecoration(
                         labelText: appTextValue('التصنيف', 'Category'),
                       ),
@@ -293,7 +293,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _selectedUnit,
+                      initialValue: _selectedUnit,
                       decoration: InputDecoration(
                         labelText: appTextValue('الوحدة *', 'Unit *'),
                       ),

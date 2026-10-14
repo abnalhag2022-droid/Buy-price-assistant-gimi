@@ -73,7 +73,7 @@ class SettingsScreen extends StatelessWidget {
               icon: Icons.tune,
               children: [
                 DropdownButtonFormField<String>(
-                  value: settings.language,
+                  initialValue: settings.language,
                   decoration: InputDecoration(
                     labelText: appTextValue('لغة البرنامج', 'Application language'),
                   ),
@@ -96,7 +96,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: settings.theme,
+                  initialValue: settings.theme,
                   decoration: InputDecoration(
                     labelText: appTextValue('المظهر', 'Appearance'),
                   ),
@@ -120,7 +120,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: settings.currency,
+                  initialValue: settings.currency,
                   decoration: InputDecoration(
                     labelText: appTextValue(
                       'العملة الافتراضية للعمليات الجديدة',

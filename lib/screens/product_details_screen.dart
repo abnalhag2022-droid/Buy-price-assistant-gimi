@@ -92,7 +92,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (_error != null || _product == null) {
-      return Scaffold(appBar: AppBar(), body: Center(child: Text(appTextValue('تعذر فتح الصنف', 'Could not open item') + ': $_error')));
+      return Scaffold(appBar: AppBar(), body: Center(child: Text('${appTextValue('تعذر فتح الصنف', 'Could not open item')}: $_error')));
     }
     final product = _product!;
     return Scaffold(
