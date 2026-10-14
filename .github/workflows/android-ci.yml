@@ -2,9 +2,9 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, update-v2, update-v3]
   pull_request:
-    branches: [main]
+    branches: [main, update-v2, update-v3]
   workflow_dispatch:
 
 permissions:
@@ -43,13 +43,16 @@ jobs:
           dart --version
           java -version
 
-      - name: Resolve dependencies (use committed lockfile when available)
+      - name: Resolve dependencies
         run: |
           if [ -f pubspec.lock ]; then
             flutter pub get --enforce-lockfile
           else
             flutter pub get
           fi
+
+      - name: Validate update source and SQLite migration
+        run: python3 tooling/validate_update_package.py && python3 tooling/verify_update_sqlite.py
 
       - name: Parse Dart sources
         run: dart format --output=none lib test
@@ -60,17 +63,109 @@ jobs:
       - name: Run unit and SQLite data tests
         run: flutter test --reporter expanded
 
-      - name: Generate Android platform files from the installed Flutter SDK
+      - name: Generate Android platform files
         run: python3 tool/prepare_android.py
+
+      # Only trusted push/manual runs receive secrets. Pull requests build without release secrets.
+      - name: Prepare release keystore and key.properties
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required repository secret $name is missing."
+              exit 1
+            fi
+          done
+
+          KEYSTORE_PATH="$RUNNER_TEMP/gimi-release.jks"
+          export KEYSTORE_PATH
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          raw = base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True)
+          if not raw:
+              raise SystemExit("Decoded keystore is empty.")
+          Path(os.environ["KEYSTORE_PATH"]).write_bytes(raw)
+          PY
+
+          # Escape Java Properties metacharacters and line endings safely.
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          def esc(s):
+              out = []
+              for i, ch in enumerate(s):
+                  if ch == '\\\\': out.append('\\\\')
+                  elif ch == '\\t': out.append('\\\\t')
+                  elif ch == '\\n': out.append('\\\\n')
+                  elif ch == '\\r': out.append('\\\\r')
+                  elif ch in '=:#!' or (ch == ' ' and i == 0): out.append('\\\\' + ch)
+                  else: out.append(ch)
+              return ''.join(out)
+          values = {
+              "storePassword": os.environ["ANDROID_KEYSTORE_PASSWORD"],
+              "keyPassword": os.environ["ANDROID_KEY_PASSWORD"],
+              "keyAlias": os.environ["ANDROID_KEY_ALIAS"],
+              "storeFile": os.environ["KEYSTORE_PATH"],
+          }
+          target = Path("android/key.properties")
+          target.write_text(''.join(f"{k}={esc(v)}\\n" for k, v in values.items()), encoding="utf-8")
+          PY
+
+          # Validate the keystore/alias/password before starting the expensive build.
+          keytool -list -keystore "$KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD >/dev/null
+          echo "Release keystore and alias validated."
 
       - name: Resolve final Android plugin metadata
         run: flutter pub get --enforce-lockfile
 
-      - name: Build release-mode test APK
+      - name: Build release-mode APK
         run: flutter build apk --release
 
       - name: Verify APK artifact exists
         run: test -s build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Verify APK signature matches release keystore
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          KEYSTORE="$RUNNER_TEMP/gimi-release.jks"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          test -x "$APKSIGNER"
+
+          KEY_SHA="$(keytool -list -v -keystore "$KEYSTORE" -alias "$ANDROID_KEY_ALIAS" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          APK_SHA="$("$APKSIGNER" verify --print-certs "$APK" \
+            | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+
+          if [ -z "$KEY_SHA" ] || [ -z "$APK_SHA" ]; then
+            echo "::error::Could not read SHA-256 certificate fingerprint."
+            exit 1
+          fi
+          if [ "$KEY_SHA" != "$APK_SHA" ]; then
+            echo "::error::APK certificate does not match the configured release keystore."
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose "$APK"
+          echo "APK signature verified against the configured release keystore."
+
+      - name: Remove temporary signing files
+        if: always()
+        run: |
+          rm -f android/key.properties "$RUNNER_TEMP/gimi-release.jks"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

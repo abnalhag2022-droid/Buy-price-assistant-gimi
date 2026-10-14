@@ -6,6 +6,7 @@ class PriceEntry {
     required this.unitPrice,
     required this.quantity,
     this.partyName,
+    this.currencyCode = 'YER',
     this.invoiceNumber,
     this.notes,
   });
@@ -16,6 +17,7 @@ class PriceEntry {
   final double unitPrice;
   final double quantity;
   final String? partyName;
+  final String currencyCode;
   final String? invoiceNumber;
   final String? notes;
 
@@ -26,6 +28,7 @@ class PriceEntry {
         unitPrice: (map['unit_price'] as num).toDouble(),
         quantity: (map['quantity'] as num).toDouble(),
         partyName: map['party_name'] as String?,
+        currencyCode: map['currency_code'] as String? ?? 'YER',
         invoiceNumber: map['invoice_number'] as String?,
         notes: map['notes'] as String?,
       );

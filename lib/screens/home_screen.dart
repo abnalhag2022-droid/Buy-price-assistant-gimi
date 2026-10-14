@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/product.dart';
 import '../utils/app_helpers.dart';
+import '../utils/app_text.dart';
 import 'price_entry_form_screen.dart';
 import 'product_details_screen.dart';
 import 'product_form_screen.dart';
+import 'backup_restore_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -68,16 +71,36 @@ class _HomeScreenState extends State<HomeScreen> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('مرجع أسعار الأصناف', style: TextStyle(fontWeight: FontWeight.w800)),
-            Text('Buy Price Assistant GIMI', style: TextStyle(fontSize: 11, color: Colors.black54)),
+            const AppText(ar: 'مرجع أسعار الأصناف', en: 'Item price reference', style: TextStyle(fontWeight: FontWeight.w800)),
+            Text('Buy Price Assistant GIMI', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
         ),
         actions: [
           IconButton(
-            tooltip: 'إضافة صنف',
+            tooltip: appTextValue('الإعدادات', 'Settings'),
+            onPressed: () async {
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+              if (mounted) _reload();
+            },
+            icon: const Icon(Icons.settings_outlined),
+          ),
+          IconButton(
+            tooltip: appTextValue('النسخ الاحتياطي والاستعادة', 'Backup and restore'),
+            onPressed: () async {
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const BackupRestoreScreen()),
+              );
+              if (mounted) _reload();
+            },
+            icon: const Icon(Icons.backup_outlined),
+          ),
+          IconButton(
+            tooltip: appTextValue('إضافة صنف', 'Add item'),
             onPressed: _addProduct,
             icon: const Icon(Icons.add_box_outlined),
           ),
@@ -87,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addProduct,
         icon: const Icon(Icons.add),
-        label: const Text('إضافة صنف'),
+        label: const AppText(ar: 'إضافة صنف', en: 'Add item'),
       ),
       body: SafeArea(
         child: Column(
@@ -102,12 +125,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     textInputAction: TextInputAction.search,
                     onChanged: _reload,
                     decoration: InputDecoration(
-                      hintText: 'ابحث باسم الصنف أو الكود أو التصنيف',
+                      hintText: appTextValue('ابحث باسم الصنف أو الكود أو التصنيف', 'Search by item name, code, or category'),
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _query.isEmpty
                           ? const Icon(Icons.search, color: Colors.black38)
                           : IconButton(
-                              tooltip: 'مسح البحث',
+                              tooltip: appTextValue('مسح البحث', 'Clear search'),
                               onPressed: () {
                                 _searchController.clear();
                                 _reload('');
@@ -124,8 +147,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       Expanded(
                         child: Text(
                           _query.trim().isEmpty
-                              ? 'الأصناف المحفوظة'
-                              : 'نتائج البحث عن: ${_query.trim()}',
+                              ? appTextValue('الأصناف المحفوظة', 'Saved items')
+                              : appTextValue('نتائج البحث عن: ${_query.trim()}', 'Search results for: ${_query.trim()}'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -134,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextButton.icon(
                         onPressed: () => _reload(),
                         icon: const Icon(Icons.refresh, size: 17),
-                        label: const Text('تحديث'),
+                        label: const AppText(ar: 'تحديث', en: 'Refresh'),
                       ),
                     ],
                   ),
@@ -151,9 +174,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (snapshot.hasError) {
                     return _MessageState(
                       icon: Icons.error_outline,
-                      title: 'تعذر تحميل الأصناف',
-                      message: 'تحقق من سلامة البيانات ثم أعد المحاولة.\n${snapshot.error}',
-                      actionLabel: 'إعادة المحاولة',
+                      title: appTextValue('تعذر تحميل الأصناف', 'Could not load items'),
+                      message: appTextValue('تحقق من سلامة البيانات ثم أعد المحاولة.', 'Check your data and try again.') + '\n${snapshot.error}',
+                      actionLabel: appTextValue('إعادة المحاولة', 'Retry'),
                       onAction: () => _reload(),
                     );
                   }
@@ -161,11 +184,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (rows.isEmpty) {
                     return _MessageState(
                       icon: _query.isEmpty ? Icons.inventory_2_outlined : Icons.search_off,
-                      title: _query.isEmpty ? 'ابدأ بإضافة أول صنف' : 'لا توجد نتائج مطابقة',
+                      title: _query.isEmpty ? appTextValue('ابدأ بإضافة أول صنف', 'Add your first item') : appTextValue('لا توجد نتائج مطابقة', 'No matching results'),
                       message: _query.isEmpty
-                          ? 'بعد تسجيل الصنف، أضف أسعار الشراء والبيع لتظهر هنا في أي وقت.'
-                          : 'جرّب جزءًا آخر من الاسم أو الكود، أو أضف الصنف إن لم يكن مسجلًا.',
-                      actionLabel: _query.isEmpty ? 'إضافة صنف' : 'مسح البحث',
+                          ? appTextValue('بعد تسجيل الصنف، أضف أسعار الشراء والبيع لتظهر هنا في أي وقت.', 'After adding an item, record purchase and sale prices to view them here anytime.')
+                          : appTextValue('جرّب جزءًا آخر من الاسم أو الكود، أو أضف الصنف إن لم يكن مسجلًا.', 'Try another part of the name or code, or add the item if it is not listed.'),
+                      actionLabel: _query.isEmpty ? appTextValue('إضافة صنف', 'Add item') : appTextValue('مسح البحث', 'Clear search'),
                       onAction: _query.isEmpty
                           ? _addProduct
                           : () {
@@ -246,10 +269,10 @@ class _ProductCard extends StatelessWidget {
                         Text(product.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                         const SizedBox(height: 3),
                         Text(
-                          [if ((product.code ?? '').isNotEmpty) 'الكود: ${product.code}', if ((product.category ?? '').isNotEmpty) product.category!]
+                          [if ((product.code ?? '').isNotEmpty) appTextValue('الكود: ${product.code}', 'Code: ${product.code}'), if ((product.category ?? '').isNotEmpty) localizeCatalogValue(context, product.category!)]
                               .join(' • ')
-                              .ifEmpty('الوحدة: ${product.unit}'),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                              .ifEmpty(appTextValue('الوحدة: ${localizeCatalogValue(context, product.unit)}', 'Unit: ${localizeCatalogValue(context, product.unit)}')),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -258,7 +281,7 @@ class _ProductCard extends StatelessWidget {
                   ),
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    tooltip: product.isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة',
+                    tooltip: appTextValue(product.isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', product.isFavorite ? 'Remove from favorites' : 'Add to favorites'),
                     onPressed: () => onFavorite(!product.isFavorite),
                     icon: Icon(product.isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
                         color: product.isFavorite ? Colors.amber.shade800 : Colors.black38),
@@ -270,8 +293,9 @@ class _ProductCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _PricePill(
-                      label: 'آخر شراء',
+                      label: appTextValue('آخر شراء', 'Latest purchase'),
                       price: product.latestPurchasePrice,
+                      currency: product.latestPurchaseCurrency,
                       date: product.latestPurchaseDate,
                       color: const Color(0xFFEAF3FF),
                       icon: Icons.shopping_cart_outlined,
@@ -280,8 +304,9 @@ class _ProductCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: _PricePill(
-                      label: 'آخر بيع',
+                      label: appTextValue('آخر بيع', 'Latest sale'),
                       price: product.latestSalePrice,
+                      currency: product.latestSaleCurrency,
                       date: product.latestSaleDate,
                       color: const Color(0xFFEAF7EF),
                       icon: Icons.sell_outlined,
@@ -296,7 +321,7 @@ class _ProductCard extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: onPurchase,
                       icon: const Icon(Icons.add_shopping_cart, size: 18),
-                      label: const Text('تسجيل شراء'),
+                      label: const AppText(ar: 'تسجيل شراء', en: 'Record purchase'),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -304,7 +329,7 @@ class _ProductCard extends StatelessWidget {
                     child: FilledButton.tonalIcon(
                       onPressed: onSale,
                       icon: const Icon(Icons.point_of_sale_outlined, size: 18),
-                      label: const Text('تسجيل بيع'),
+                      label: const AppText(ar: 'تسجيل بيع', en: 'Record sale'),
                     ),
                   ),
                 ],
@@ -318,9 +343,10 @@ class _ProductCard extends StatelessWidget {
 }
 
 class _PricePill extends StatelessWidget {
-  const _PricePill({required this.label, required this.price, required this.date, required this.color, required this.icon});
+  const _PricePill({required this.label, required this.price, required this.currency, required this.date, required this.color, required this.icon});
   final String label;
   final double? price;
+  final String? currency;
   final String? date;
   final Color color;
   final IconData icon;
@@ -328,17 +354,17 @@ class _PricePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(13)),
+        decoration: BoxDecoration(color: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).colorScheme.surfaceContainerHighest : color, borderRadius: BorderRadius.circular(13)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [Icon(icon, size: 15), const SizedBox(width: 5), Flexible(child: Text(label, style: const TextStyle(fontSize: 12)))]),
             const SizedBox(height: 5),
-            Text(price == null ? 'غير مسجل' : '${formatMoney(price)} ر.ي',
+            Text(price == null ? appTextValue('غير مسجل', 'Not recorded') : '${formatMoney(price)} ${currencyLabel(context, currency)}',
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
             if (date != null) ...[
               const SizedBox(height: 3),
-              Text(formatDate(date), style: const TextStyle(fontSize: 11, color: Colors.black54)),
+              Text(formatDate(date, Localizations.localeOf(context).languageCode), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ],
           ],
         ),
@@ -364,7 +390,7 @@ class _MessageState extends StatelessWidget {
               const SizedBox(height: 16),
               Text(title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text(message, style: const TextStyle(color: Colors.black54, height: 1.5), textAlign: TextAlign.center),
+              Text(message, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.5), textAlign: TextAlign.center),
               const SizedBox(height: 18),
               FilledButton.icon(onPressed: onAction, icon: const Icon(Icons.arrow_forward), label: Text(actionLabel)),
             ],

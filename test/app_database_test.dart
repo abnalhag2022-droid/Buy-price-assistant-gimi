@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -71,4 +73,69 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+  test('backup round-trip preserves products and all price history', () async {
+    final id = await db.saveProduct(
+      name: 'لوح شمسي', code: 'PV-01', category: 'طاقة', unit: 'لوح',
+      brand: 'GIMI', notes: 'اختبار', isFavorite: true,
+    );
+    await db.recordPurchase(
+      productId: id, date: '2026-10-01', unitPrice: 100, quantity: 3,
+      supplier: 'المورد', invoiceNumber: 'INV-1', notes: 'شراء',
+    );
+    await db.recordSale(
+      productId: id, date: '2026-10-02', unitPrice: 150, quantity: 1,
+      customer: 'العميل', notes: 'بيع',
+    );
+    await db.archiveProduct(id);
+    final backup = await db.exportBackupJson();
+    await db.restoreBackupJson(backup);
+    expect(await db.getProduct(id), isNotNull);
+    expect(await db.getPurchaseHistory(id), hasLength(1));
+    expect(await db.getSaleHistory(id), hasLength(1));
+    expect((await db.getProduct(id))!['is_archived'], 1);
+  });
+
+  test('invalid backup does not delete existing data', () async {
+    final id = await db.saveProduct(name: 'بيانات محفوظة');
+    await expectLater(
+      db.restoreBackupJson('{"format":"wrong","schemaVersion":1,"tables":{}}'),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await db.getProduct(id), isNotNull);
+  });
+
+  test('finds historical item-name suggestions by substring', () async {
+    final first = await db.saveProduct(name: 'محول 110 كيلوواط بيدفورد الوكالة');
+    final second = await db.saveProduct(name: 'محول 75 كيلوواط بيدفورد الوكالة');
+    await db.archiveProduct(second);
+    final rows = await db.suggestProductNames('بيدفورد');
+    expect(rows.map((row) => row['id']), containsAll(<int>[first, second]));
+    expect(await db.findExactProductName('محول 110 كيلوواط بيدفورد الوكالة'), isNotNull);
+  });
+
+  test('stores a transaction currency and maps old backup records to YER', () async {
+    final id = await db.saveProduct(name: 'بطارية اختبار');
+    await db.recordPurchase(
+      productId: id,
+      date: '2026-10-01',
+      unitPrice: 100,
+      quantity: 1,
+      currencyCode: 'USD',
+    );
+    expect((await db.getPurchaseHistory(id)).single['currency_code'], 'USD');
+
+    final decoded = jsonDecode(await db.exportBackupJson()) as Map<String, dynamic>;
+    decoded['schemaVersion'] = 1;
+    final tables = Map<String, dynamic>.from(decoded['tables'] as Map);
+    final entries = (tables['purchase_entries'] as List).map((raw) {
+      final item = Map<String, dynamic>.from(raw as Map);
+      item.remove('currency_code');
+      return item;
+    }).toList();
+    tables['purchase_entries'] = entries;
+    decoded['tables'] = tables;
+    await db.restoreBackupJson(jsonEncode(decoded));
+    expect((await db.getPurchaseHistory(id)).single['currency_code'], 'YER');
+  });
+
 }

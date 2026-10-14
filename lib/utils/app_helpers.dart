@@ -84,16 +84,16 @@ String toIsoDate(DateTime date) =>
     '${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
 
-String formatDate(String? isoDate) {
-  if (isoDate == null || isoDate.isEmpty) return 'غير مسجل';
+String formatDate(String? isoDate, [String locale = 'ar']) {
+  if (isoDate == null || isoDate.isEmpty) return locale == 'ar' ? 'غير مسجل' : 'Not recorded';
   final parsed = DateTime.tryParse(isoDate);
   if (parsed == null) return isoDate;
-  return DateFormat('dd/MM/yyyy', 'ar').format(parsed);
+  return DateFormat('dd/MM/yyyy', locale).format(parsed);
 }
 
-String formatDateTime(String? isoDateTime) {
-  if (isoDateTime == null || isoDateTime.isEmpty) return 'غير مسجل';
+String formatDateTime(String? isoDateTime, [String locale = 'ar']) {
+  if (isoDateTime == null || isoDateTime.isEmpty) return locale == 'ar' ? 'غير مسجل' : 'Not recorded';
   final parsed = DateTime.tryParse(isoDateTime);
   if (parsed == null) return isoDateTime;
-  return DateFormat('dd/MM/yyyy - HH:mm', 'ar').format(parsed);
+  return DateFormat('dd/MM/yyyy - HH:mm', locale).format(parsed);
 }

@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../data/app_database.dart';
 import '../utils/app_helpers.dart';
+import '../state/app_settings.dart';
+import '../utils/app_text.dart';
 
 class PriceEntryFormScreen extends StatefulWidget {
   const PriceEntryFormScreen({super.key, required this.productId, required this.productName, required this.isPurchase});
@@ -24,6 +26,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   final _notes = TextEditingController();
   DateTime _date = DateTime.now();
   bool _saving = false;
+  String _currency = AppSettings.instance.currency;
 
   @override
   void dispose() {
@@ -38,7 +41,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      locale: const Locale('ar'),
+      locale: Localizations.localeOf(context),
       initialDate: _date,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
@@ -51,9 +54,9 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
 
   String? _validateNumber(String? value, {required bool quantity}) {
     final parsed = parseLocalizedNumber(value ?? '');
-    if (parsed == null) return 'أدخل رقمًا صحيحًا.';
+    if (parsed == null) return appTextValue('أدخل رقمًا صحيحًا.', 'Enter a valid number.');
     if (quantity ? parsed <= 0 : parsed < 0) {
-      return quantity ? 'الكمية يجب أن تكون أكبر من صفر.' : 'السعر يجب ألا يكون سالبًا.';
+      return quantity ? appTextValue('الكمية يجب أن تكون أكبر من صفر.', 'Quantity must be greater than zero.') : appTextValue('السعر يجب ألا يكون سالبًا.', 'Price cannot be negative.');
     }
     return null;
   }
@@ -74,6 +77,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
           supplier: _party.text,
           invoiceNumber: _invoice.text,
           notes: _notes.text,
+          currencyCode: _currency,
         );
       } else {
         await AppDatabase.instance.recordSale(
@@ -83,6 +87,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
           quantity: quantity,
           customer: _party.text,
           notes: _notes.text,
+          currencyCode: _currency,
         );
       }
       if (mounted) Navigator.of(context).pop(true);
@@ -97,7 +102,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isPurchase = widget.isPurchase;
-    final title = isPurchase ? 'تسجيل عملية شراء' : 'تسجيل عملية بيع';
+    final title = appTextValue(isPurchase ? 'تسجيل عملية شراء' : 'تسجيل عملية بيع', isPurchase ? 'Record purchase' : 'Record sale');
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: Form(
@@ -109,7 +114,7 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
               child: ListTile(
                 leading: CircleAvatar(child: Icon(isPurchase ? Icons.shopping_cart_outlined : Icons.sell_outlined)),
                 title: Text(widget.productName, style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات'),
+                subtitle: Text(appTextValue(isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات', isPurchase ? 'This price will be saved in purchase history' : 'This price will be saved in sales history')),
               ),
             ),
             const SizedBox(height: 14),
@@ -117,8 +122,8 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
               onTap: _pickDate,
               borderRadius: BorderRadius.circular(14),
               child: InputDecorator(
-                decoration: const InputDecoration(labelText: 'تاريخ العملية *', prefixIcon: Icon(Icons.calendar_month_outlined)),
-                child: Row(children: [Expanded(child: Text(formatDate(toIsoDate(_date)))), const Icon(Icons.edit_calendar_outlined)]),
+                decoration: InputDecoration(labelText: appTextValue('تاريخ العملية *', 'Transaction date *'), prefixIcon: Icon(Icons.calendar_month_outlined)),
+                child: Row(children: [Expanded(child: Text(formatDate(toIsoDate(_date), Localizations.localeOf(context).languageCode))), const Icon(Icons.edit_calendar_outlined)]),
               ),
             ),
             const SizedBox(height: 12),
@@ -126,30 +131,41 @@ class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
               controller: _price,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9٠-٩۰-۹.,٫٬\-]'))],
-              decoration: InputDecoration(labelText: isPurchase ? 'سعر شراء الوحدة *' : 'سعر بيع الوحدة *', suffixText: 'ر.ي', helperText: 'اكتب السعر للوحدة الواحدة، ويمكن إدخال الأرقام العربية أو الإنجليزية.'),
+              decoration: InputDecoration(labelText: appTextValue(isPurchase ? 'سعر شراء الوحدة *' : 'سعر بيع الوحدة *', isPurchase ? 'Purchase price per unit *' : 'Sale price per unit *'), suffixText: currencyLabel(context, _currency), helperText: appTextValue('اكتب السعر للوحدة الواحدة، ويمكن إدخال الأرقام العربية أو الإنجليزية.', 'Enter price per unit. Arabic and English digits are supported.')),
               validator: (value) => _validateNumber(value, quantity: false),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _currency,
+              decoration: InputDecoration(labelText: appTextValue('عملة العملية', 'Transaction currency')),
+              items: const [
+                DropdownMenuItem(value: 'USD', child: Text('USD — US Dollar')),
+                DropdownMenuItem(value: 'SAR', child: Text('SAR — Saudi Riyal')),
+                DropdownMenuItem(value: 'YER', child: Text('YER — Yemeni Rial')),
+              ],
+              onChanged: (value) { if (value != null) setState(() => _currency = value); },
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _quantity,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9٠-٩۰-۹.,٫٬]'))],
-              decoration: const InputDecoration(labelText: 'الكمية *'),
+              decoration: InputDecoration(labelText: appTextValue('الكمية *', 'Quantity *')),
               validator: (value) => _validateNumber(value, quantity: true),
             ),
             const SizedBox(height: 12),
-            TextFormField(controller: _party, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: isPurchase ? 'اسم المورد' : 'اسم العميل')),
+            TextFormField(controller: _party, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: appTextValue(isPurchase ? 'اسم المورد' : 'اسم العميل', isPurchase ? 'Supplier name' : 'Customer name'))),
             if (isPurchase) ...[
               const SizedBox(height: 12),
-              TextFormField(controller: _invoice, textInputAction: TextInputAction.next, decoration: const InputDecoration(labelText: 'رقم الفاتورة')),
+              TextFormField(controller: _invoice, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: appTextValue('رقم الفاتورة', 'Invoice number'))),
             ],
             const SizedBox(height: 12),
-            TextFormField(controller: _notes, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'ملاحظات العملية', alignLabelWithHint: true)),
+            TextFormField(controller: _notes, minLines: 2, maxLines: 4, decoration: InputDecoration(labelText: appTextValue('ملاحظات العملية', 'Transaction notes'), alignLabelWithHint: true)),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _saving ? null : _save,
               icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-              label: Text(_saving ? 'جارٍ الحفظ...' : 'حفظ العملية'),
+              label: AppText(ar: _saving ? 'جارٍ الحفظ...' : 'حفظ العملية', en: _saving ? 'Saving...' : 'Save transaction'),
             ),
           ],
         ),

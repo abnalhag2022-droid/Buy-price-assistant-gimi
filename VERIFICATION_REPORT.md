@@ -1,21 +1,26 @@
-# Verification report — Buy Price Assistant GIMI
+# تقرير التحقق — Buy Price Assistant GIMI v1.1.0+3
 
-## Completed in the authoring environment
+## ما تم فحصه محليًا
 
-- Created a new source tree from newly authored application files; no pre-existing project source was imported.
-- Parsed `pubspec.yaml`, `analysis_options.yaml`, and `.github/workflows/android-ci.yml` as YAML.
-- Extracted and executed the SQLite table/index DDL from `lib/data/app_database.dart` against Python's SQLite engine.
-- Exercised representative insert/query behavior for multiple purchase entries, latest purchase selection, latest sale selection, entry counts, and archiving while retaining history.
-- Added Dart unit tests for Arabic normalization, localized-number parsing, money formatting, SQL LIKE escaping, and database history/search/archiving/validation behavior.
-- Added a pinned Flutter stable toolchain in GitHub Actions, test dependencies, Android platform generation from that same Flutter SDK, a release-mode APK build, and artifact upload steps.
+- التحقق من مصدر الأساس `1.0.1+2` ومخطط قاعدة البيانات `1` قبل إنشاء نسخة المرشح.
+- إنشاء مجلد مرشح منفصل؛ لم يتغير مجلد المصدر الأساسي.
+- تحليل YAML للملفات `pubspec.yaml` و`analysis_options.yaml` و`.github/workflows/android-ci.yml`.
+- فحوص بنيوية لحقول العملة والترحيل والتوافق مع النسخ القديمة والإعدادات والاختبارات.
+- تشغيل تعليمات `CREATE TABLE` الفعلية المستخرجة من كود Dart على SQLite.
+- محاكاة ترحيل v1 إلى v2 مع بيانات شراء وبيع موجودة؛ بقيت الأسعار كما هي وأُسندت YER إلى السجلات القديمة.
+- اختبار SQL لأحدث عملة شراء وأحدث عملة بيع، ورفض EUR، والبحث الجزئي عن اسم صنف، والعثور على تطابق الاسم.
+- فحص صياغة سكربتات Python، وعدم وجود `.git` أو مفاتيح توقيع/ملفات أسرار داخل شجرة المرشح.
 
-## Not yet verified by execution
+## ما لم يتم تشغيله
 
-The current authoring container has Java and Python but does not have Flutter, Dart, Gradle, or Android SDK installed, and it cannot download the Flutter SDK from the container shell. Therefore `dart format`, `flutter analyze`, `flutter test`, and `flutter build apk --release` have **not** been executed here. Their actual result must be read from the first GitHub Actions run. No statement in this report should be interpreted as claiming that the APK has already built successfully.
+- `dart format` و`flutter analyze`.
+- `flutter test`، بما فيها اختبارات Dart الجديدة.
+- حل الحزم من Pub في Flutter SDK.
+- توليد Android، وبناء APK، والتحقق من توقيعه.
+- تثبيت APK واختبار واجهته يدويًا على جهاز Android.
 
-## Required gate before installation or daily business use
+لا يحتوي هذا السياق على Flutter/Dart SDK؛ لذلك لا أقدّم الفحوص البنيوية وSQLite على أنها بديل لتحليل Dart واختبارات Flutter والبناء الحقيقي.
 
-1. Create the new GitHub repository and push the source.
-2. Require the full `Android CI` workflow to pass, including tests and APK existence check. Fix any observed CI failures before proceeding.
-3. Install the generated APK on an Android device and manually test adding/editing a product, Arabic partial search, purchase and sale entries, history ordering, persistence after force-close/reopen, favorites, and archiving.
-4. Before relying on the database for important business records, add and test in-app backup/export and restore. The initial release does not yet implement that feature.
+## قرار التسليم
+
+هذه حزمة مصدر مرشحة محلية للمراجعة المشتركة، وليست إصدارًا مثبتًا أو بناءً ناجحًا. لم تُنفذ أي كتابة إلى GitHub: لا فرع جديد، ولا commit، ولا push، ولا Pull Request. الخطوة التالية تُنفذ لاحقًا بالتعاون بعد مراجعة الملفات، ثم نقرأ نتائج GitHub Actions الفعلية ونصلح أي خطأ يظهر.
