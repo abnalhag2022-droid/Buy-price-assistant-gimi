@@ -87,7 +87,7 @@ class SpreadsheetExchange {
     if (raw is IntCellValue) return raw.value.toString();
     if (raw is DoubleCellValue) return raw.value.toString();
     if (raw is BoolCellValue) return raw.value ? 'true' : 'false';
-    if (raw is FormulaCellValue) return raw.formula ?? '';
+    if (raw is FormulaCellValue) return raw.formula;
     return raw.toString().trim();
   }
 
@@ -411,7 +411,7 @@ class SpreadsheetExchange {
     final rows = await _exportRows();
     final workbook = Excel.createExcel();
     workbook.rename('Sheet1', 'Data');
-    final sheet = workbook['Data']..rtl = true;
+    final sheet = workbook['Data']..isRTL = true;
     sheet.appendRow(headers.map<CellValue>((v) => TextCellValue(v)).toList());
     for (final row in rows.skip(1)) {
       sheet.appendRow(row.map<CellValue?>((v) {
