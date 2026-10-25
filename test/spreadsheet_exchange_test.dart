@@ -33,7 +33,7 @@ void main() {
     final id = await db.saveProduct(name: 'محول شمسي', unit: 'قطعة', code: 'OLD', category: 'قديم');
     final source = '${header}PURCHASE,مُحَوِّل شمسي,قطعة,NEW,جديد,,ملاحظة,2026-10-01,100,USD,2,مورد,INV-1,ملاحظة عملية,0,0,\n';
     final preview = await exchange.previewBytes(bytes(source), 'history.csv');
-    expect(preview.canImport, isTrue);
+    expect(preview.canImport, isTrue, reason: 'valid=${preview.validTransactionCount}; errors=${preview.errorCount}; issues=${preview.issues.map((i) => i.message).join(' | ')}');
     expect(preview.matchedProducts, 1);
     final result = await exchange.importPreview(preview, confirmDuplicates: false);
     expect(result.productsAdded, 0);
@@ -68,7 +68,7 @@ void main() {
     await db.archiveProduct(archivedId);
     final archived = await exchange.previewBytes(bytes('${header}PURCHASE,صنف مؤرشف,قطعة,C-3,,,,2026-10-03,30,YER,1,مورد,INV,شراء,0,0,\n'), 'archived.csv');
     expect(archived.canImport, isFalse);
-    expect(archived.issues.any((x) => x.isError && x.message.contains('مؤرشف')), isTrue);
+    expect(archived.issues.any((x) => x.isError && x.message.contains('مؤرشف')), isTrue, reason: 'canImport=${archived.canImport}; valid=${archived.validTransactionCount}; errors=${archived.errorCount}; issues=${archived.issues.map((i) => i.message).join(' | ')}');
     expect(await db.getPurchaseHistory(archivedId), isEmpty);
   });
 
