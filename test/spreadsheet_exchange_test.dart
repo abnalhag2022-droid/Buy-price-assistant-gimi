@@ -63,7 +63,7 @@ void main() {
 
   test('ignores unsupported invoice number on sales rows without blocking import', () async {
     final id = await db.saveProduct(name: 'صنف بيع', unit: 'قطعة');
-    final row = 'SALE,صنف بيع,قطعة,,,,,2026-10-13,2100,YER,1,عميل,20,ملاحظة,0,0,\\n';
+    final row = 'SALE,صنف بيع,قطعة,,,,,2026-10-13,2100,YER,1,عميل,20,ملاحظة,0,0,\n';
     final preview = await exchange.previewBytes(bytes(header + row), 'sale-with-invoice.csv');
     expect(preview.canImport, isTrue, reason: "errors=${preview.errorCount}; issues=${preview.issues.map((i) => i.message).join(" | ")}");
     expect(preview.rows.single.invoice, isNull);
