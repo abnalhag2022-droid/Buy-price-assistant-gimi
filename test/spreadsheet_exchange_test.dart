@@ -87,5 +87,9 @@ void main() {
     expect(csv, contains('SALE'));
     expect(csv, contains('USD'));
     expect(csv, contains('SAR'));
+    final xlsx = await exchange.exportXlsx();
+    final xlsxPreview = await exchange.previewBytes(xlsx, 'data.xlsx');
+    expect(xlsxPreview.canImport, isTrue);
+    expect(xlsxPreview.validTransactionCount, 2);
   });
 }
