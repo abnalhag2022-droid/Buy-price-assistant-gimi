@@ -31,8 +31,7 @@ void main() {
 
   test('matches existing product by normalized name and unit without overwriting metadata', () async {
     final id = await db.saveProduct(name: 'محول شمسي', unit: 'قطعة', code: 'OLD', category: 'قديم');
-    final source = header +
-        'PURCHASE,مُحَوِّل شمسي,قطعة,NEW,جديد,,ملاحظة,2026-10-01,100,USD,2,مورد,INV-1,ملاحظة عملية,0,0,\n';
+    final source = '${header}PURCHASE,مُحَوِّل شمسي,قطعة,NEW,جديد,,ملاحظة,2026-10-01,100,USD,2,مورد,INV-1,ملاحظة عملية,0,0,\n';
     final preview = await exchange.previewBytes(bytes(source), 'history.csv');
     expect(preview.canImport, isTrue);
     expect(preview.matchedProducts, 1);
@@ -63,13 +62,11 @@ void main() {
   });
 
   test('rejects new sale-only products and refuses archived matches', () async {
-    final saleOnly = await exchange.previewBytes(bytes(header +
-        'SALE,بيع فقط,قطعة,C-2,,,,2026-10-03,30,YER,1,عميل,,ملاحظة,0,0,\n'), 'sale.csv');
+    final saleOnly = await exchange.previewBytes(bytes('${header}SALE,بيع فقط,قطعة,C-2,,,,2026-10-03,30,YER,1,عميل,,ملاحظة,0,0,\n'), 'sale.csv');
     expect(saleOnly.canImport, isFalse);
     final archivedId = await db.saveProduct(name: 'صنف مؤرشف', unit: 'قطعة');
     await db.archiveProduct(archivedId);
-    final archived = await exchange.previewBytes(bytes(header +
-        'PURCHASE,صنف مؤرشف,قطعة,C-3,,,,2026-10-03,30,YER,1,مورد,INV,شراء,0,0,\n'), 'archived.csv');
+    final archived = await exchange.previewBytes(bytes('${header}PURCHASE,صنف مؤرشف,قطعة,C-3,,,,2026-10-03,30,YER,1,مورد,INV,شراء,0,0,\n'), 'archived.csv');
     expect(archived.canImport, isFalse);
     expect(archived.issues.any((x) => x.isError && x.message.contains('مؤرشف')), isTrue);
     expect(await db.getPurchaseHistory(archivedId), isEmpty);
