@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-fast structural and SQLite checks for the GIMI 1.1.0 source update."""
+"""Fail-fast structural, spreadsheet, and SQLite checks for GIMI 1.3.0."""
 from __future__ import annotations
 
 import re
@@ -36,8 +36,20 @@ def main() -> int:
     db_tests = source("test/app_database_test.dart")
     settings_tests = source("test/app_settings_test.dart")
     migration_tests = source("test/database_migration_test.dart")
+    spreadsheet = source("lib/data/spreadsheet_exchange.dart")
+    exchange_tests = source("test/spreadsheet_exchange_test.dart")
+    exchange_screen = source("lib/screens/data_exchange_screen.dart")
+    support_screen = source("lib/screens/support_screen.dart")
 
-    require(bool(re.search(r"(?m)^version:\s*1\.2\.0\+4\s*$", pubspec)), "version is 1.2.0+4")
+    require(bool(re.search(r"(?m)^version:\s*1\.2\.0\+4\s*$", pubspec)), "version is 1.3.0+5")
+    require("excel: ^4.0.6" in pubspec and "csv: ^6.0.0" in pubspec, "Excel and CSV dependencies are declared")
+    require("url_launcher: ^6.3.2" in pubspec, "support link dependency is declared")
+    require("transaction((txn) async" in spreadsheet and "confirmDuplicates" in spreadsheet, "spreadsheet imports use preview and one atomic transaction")
+    require("restoreBackupJson" not in spreadsheet, "spreadsheet imports do not invoke destructive JSON restore")
+    require("duplicateCount" in spreadsheet, "spreadsheet duplicate detection exists")
+    require("normalizes header names and dates" in exchange_tests, "spreadsheet validation tests are included")
+    require("DataExchangeScreen" in exchange_screen and "SupportScreen" in support_screen, "data exchange and support screens are included")
+    require("https://wa.me/967773436537" in support_screen and "abnalhag2022@gmail.com" in support_screen, "support contacts match approved details")
     require("shared_preferences: ^2.5.6" in pubspec, "persistent settings dependency is declared")
     require("static const _databaseVersion = 2;" in database and "onUpgrade: _upgradeSchema" in database, "database v1-to-v2 migration is wired")
     require("currency_code TEXT NOT NULL DEFAULT 'YER'" in database, "new currency column defaults legacy records to YER")
