@@ -55,8 +55,9 @@ class SpreadsheetExchange {
     }
     if (value.isEmpty) return null;
     DateTime? checked(int y, int m, int d) {
-      final date = DateTime.tryParse(y.toString().padLeft(4, '0') + '-' +
-          m.toString().padLeft(2, '0') + '-' + d.toString().padLeft(2, '0'));
+      final date = DateTime.tryParse(
+        '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}',
+      );
       if (date == null || date.year != y || date.month != m || date.day != d) return null;
       return date;
     }
@@ -97,7 +98,7 @@ class SpreadsheetExchange {
   }
 
   static String _key(String name, String unit) =>
-      normalizeForSearch(name) + '\u001f' + normalizeForSearch(unit);
+      '${normalizeForSearch(name)}\u001f${normalizeForSearch(unit)}';
   static String? _nullable(String s) => s.trim().isEmpty ? null : s.trim();
   static bool _flag(String s) => const {'1', 'true', 'yes', 'y', 'نعم'}.contains(normalizeForSearch(s));
 
@@ -133,7 +134,7 @@ class SpreadsheetExchange {
         matrix = sheets.first.rows.map((row) => row.map(_cellText).toList()).toList();
       } catch (e) {
         if (e is FormatException) rethrow;
-        throw FormatException('تعذر قراءة XLSX. تأكد أن الملف سليم وغير محمي. ' + e.toString());
+        throw FormatException('تعذر قراءة XLSX. تأكد أن الملف سليم وغير محمي. $e');
       }
     } else {
       throw const FormatException('الصيغ المدعومة هي XLSX وCSV UTF-8.');
@@ -188,7 +189,7 @@ class SpreadsheetExchange {
         if (quantity == null || quantity <= 0) errors.add('الكمية مطلوبة ويجب أن تكون أكبر من صفر.');
         if (currency.isEmpty) {
           currency = AppSettings.instance.currency;
-          warnings.add('العملة غير محددة؛ ستستخدم العملة الافتراضية الحالية: ' + currency + '.');
+          warnings.add('العملة غير محددة؛ ستستخدم العملة الافتراضية الحالية: $currency.');
         }
         if (!const {'YER', 'SAR', 'USD'}.contains(currency)) errors.add('العملة يجب أن تكون YER أو SAR أو USD.');
         if (type == 'SALE' && invoice.isNotEmpty) errors.add('رقم الفاتورة غير مدعوم في سجلات البيع؛ لا يمكن حفظه.');
@@ -306,7 +307,9 @@ class SpreadsheetExchange {
     var valid = 0;
     for (final r in rows) {
       if (!r.hasTransaction || r.errors.isNotEmpty || r.type.isEmpty || r.date == null ||
-          r.price == null || r.quantity == null || r.name.isEmpty || r.unit.isEmpty) continue;
+          r.price == null || r.quantity == null || r.name.isEmpty || r.unit.isEmpty) {
+        continue;
+      }
       valid++;
       final sig = _sig(type: r.type, key: _key(r.name, r.unit), date: r.date!, price: r.price!,
         currency: r.currency, quantity: r.quantity!, party: r.party, invoice: r.invoice, notes: r.notes);
@@ -404,7 +407,8 @@ class SpreadsheetExchange {
       final s = value?.toString() ?? '';
       return s.isNotEmpty && '=+-@'.contains(s[0]) ? "'$s" : s;
     }).toList()).toList();
-    return Uint8List.fromList(utf8.encode('\uFEFF' + const ListToCsvConverter().convert(safe)));
+    final csv = const ListToCsvConverter().convert(safe);
+    return Uint8List.fromList(utf8.encode('\uFEFF$csv'));
   }
 
   Future<Uint8List> exportXlsx() async {
