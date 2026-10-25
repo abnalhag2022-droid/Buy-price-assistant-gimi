@@ -27,15 +27,12 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
           ? await SpreadsheetExchange.instance.exportXlsx()
           : await SpreadsheetExchange.instance.exportCsv();
       final now = DateTime.now();
-      final stamp = now.year.toString() +
-          now.month.toString().padLeft(2, '0') +
-          now.day.toString().padLeft(2, '0') + '_' +
-          now.hour.toString().padLeft(2, '0') +
-          now.minute.toString().padLeft(2, '0');
+      final stamp = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
       final extension = excel ? 'xlsx' : 'csv';
       final path = await FilePicker.platform.saveFile(
         dialogTitle: appTextValue('حفظ ملف التصدير', 'Save export file'),
-        fileName: 'gimi_data_' + stamp + '.' + extension,
+        fileName: 'gimi_data_$stamp.$extension',
         type: FileType.custom,
         allowedExtensions: [extension],
         bytes: bytes,
@@ -82,10 +79,8 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
         confirmDuplicates: confirmedDuplicates,
       );
       _message(appTextValue(
-        'اكتمل الاستيراد: ' + imported.productsAdded.toString() + ' صنف جديد و' +
-            imported.transactionsAdded.toString() + ' عملية تاريخية.',
-        'Import complete: ' + imported.productsAdded.toString() + ' new products and ' +
-            imported.transactionsAdded.toString() + ' history entries.',
+        'اكتمل الاستيراد: ${imported.productsAdded} صنف جديد و${imported.transactionsAdded} عملية تاريخية.',
+        'Import complete: ${imported.productsAdded} new products and ${imported.transactionsAdded} history entries.',
       ));
     } on SpreadsheetImportException catch (e) {
       _message(appTextValue('أُوقف الاستيراد لحماية البيانات: ', 'Import stopped to protect data: ') + e.message);
@@ -125,8 +120,7 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 3),
                         child: Text(
-                          (issue.isError ? '✖ ' : '• ') +
-                              appTextValue('صف ', 'Row ') + issue.row.toString() + ': ' + issue.message,
+                          '${issue.isError ? '✖ ' : '• '}${appTextValue('صف ', 'Row ')}${issue.row}: ${issue.message}',
                           style: TextStyle(color: issue.isError ? Theme.of(context).colorScheme.error : null, fontSize: 12),
                         ),
                       );
@@ -153,8 +147,8 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
     builder: (dialog) => AlertDialog(
       title: Text(appTextValue('تأكيد العمليات المكررة', 'Confirm duplicate entries')),
       content: Text(appTextValue(
-        'عُثر على ' + count.toString() + ' عملية مكررة. الموافقة ستضيفها مرة أخرى دون حذف أي سجل. هل تريد المتابعة؟',
-        count.toString() + ' duplicate transaction(s) found. Continuing will add them again without deleting existing records. Continue?',
+        'عُثر على $count عملية مكررة. الموافقة ستضيفها مرة أخرى دون حذف أي سجل. هل تريد المتابعة؟',
+        '$count duplicate transaction(s) found. Continuing will add them again without deleting existing records. Continue?',
       )),
       actions: [
         TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(appTextValue('إلغاء', 'Cancel'))),
