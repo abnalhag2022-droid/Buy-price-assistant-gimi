@@ -1,1 +1,0 @@
-Temporary write-access probe. This file will be removed after verifying GitHub write access.
