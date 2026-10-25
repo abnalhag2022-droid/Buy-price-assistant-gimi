@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../state/app_settings.dart';
 import '../utils/app_text.dart';
+import 'data_exchange_screen.dart';
+import 'support_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -211,9 +213,31 @@ class SettingsScreen extends StatelessWidget {
             const SizedBox(height: 14),
             Card(
               child: ListTile(
+                leading: const Icon(Icons.table_view_outlined),
+                title: const AppText(ar: 'استيراد وتصدير Excel وCSV', en: 'Excel and CSV import/export'),
+                subtitle: const AppText(ar: 'معاينة قبل الاستيراد وتصدير سجل الأسعار كاملًا.', en: 'Preview imports and export complete price history.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const DataExchangeScreen()),
+                ),
+              ),
+            ),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.support_agent_outlined),
+                title: const AppText(ar: 'الدعم والتواصل', en: 'Support and contact'),
+                subtitle: const AppText(ar: 'التواصل عبر واتساب أو البريد الإلكتروني.', en: 'Contact us through WhatsApp or email.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const SupportScreen()),
+                ),
+              ),
+            ),
+            Card(
+              child: ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const AppText(ar: 'حول التطبيق', en: 'About the app'),
-                subtitle: const Text('Buy Price Assistant GIMI · 1.1.0'),
+                subtitle: const Text('Buy Price Assistant GIMI · 1.3.0'),
               ),
             ),
           ],
