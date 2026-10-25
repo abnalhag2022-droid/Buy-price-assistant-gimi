@@ -174,7 +174,10 @@ class SpreadsheetExchange {
       final priceRaw = get('price');
       final quantityRaw = get('quantity');
       final party = get('party');
-      final invoice = get('invoice');
+      final invoiceRaw = get('invoice');
+      // Sales do not have an invoice-number field in the current database schema.
+      // Ignore any legacy/exported value instead of blocking the whole import.
+      final invoice = type == 'SALE' ? '' : invoiceRaw;
       final notes = get('notes');
       final hasTransaction = [get('type'), dateRaw, priceRaw, quantityRaw, party, invoice, notes].any((v) => v.isNotEmpty);
       final errors = <String>[];
@@ -195,7 +198,7 @@ class SpreadsheetExchange {
           warnings.add('العملة غير محددة؛ ستستخدم العملة الافتراضية الحالية: $currency.');
         }
         if (!const {'YER', 'SAR', 'USD'}.contains(currency)) errors.add('العملة يجب أن تكون YER أو SAR أو USD.');
-        if (type == 'SALE' && invoice.isNotEmpty) errors.add('رقم الفاتورة غير مدعوم في سجلات البيع؛ لا يمكن حفظه.');
+        if (type == 'SALE' && invoiceRaw.isNotEmpty) warnings.add('رقم الفاتورة في سجل البيع غير مدعوم؛ سيتم تجاهل قيمته أثناء الاستيراد.');
       }
       DateTime? created;
       final createdRaw = get('createdAt');
