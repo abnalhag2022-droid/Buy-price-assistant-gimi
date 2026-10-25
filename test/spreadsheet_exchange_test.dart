@@ -47,7 +47,7 @@ void main() {
   test('requires explicit confirmation for duplicate entries', () async {
     final row = 'PURCHASE,صنف جديد,قطعة,C-1,معدات,, ,2026-10-02,25,YER,3,مورد,INV-2,اختبار,0,0,\n';
     final preview = await exchange.previewBytes(bytes(header + row + row), 'duplicates.csv');
-    expect(preview.canImport, isTrue);
+    expect(preview.canImport, isTrue, reason: 'valid=${preview.validTransactionCount}; errors=${preview.errorCount}; issues=${preview.issues.map((i) => i.message).join(' | ')}');
     expect(preview.duplicateCount, 1);
     await expectLater(exchange.importPreview(preview, confirmDuplicates: false), throwsA(isA<SpreadsheetImportException>()));
     expect(await db.searchProducts('صنف جديد'), isEmpty);
