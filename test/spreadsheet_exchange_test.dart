@@ -61,6 +61,18 @@ void main() {
     expect(details!['purchase_count'], 2);
   });
 
+  test('ignores unsupported invoice number on sales rows without blocking import', () async {
+    final id = await db.saveProduct(name: 'صنف بيع', unit: 'قطعة');
+    final row = 'SALE,صنف بيع,قطعة,,,,,2026-10-13,2100,YER,1,عميل,20,ملاحظة,0,0,\\n';
+    final preview = await exchange.previewBytes(bytes(header + row), 'sale-with-invoice.csv');
+    expect(preview.canImport, isTrue, reason: "errors=${preview.errorCount}; issues=${preview.issues.map((i) => i.message).join(" | ")}");
+    expect(preview.rows.single.invoice, isNull);
+    expect(preview.rows.single.warnings.any((w) => w.contains('تجاهل')), isTrue);
+    final result = await exchange.importPreview(preview, confirmDuplicates: false);
+    expect(result.transactionsAdded, 1);
+    expect(await db.getSaleHistory(id), hasLength(1));
+  });
+
   test('rejects new sale-only products and refuses archived matches', () async {
     final saleOnly = await exchange.previewBytes(bytes('${header}SALE,بيع فقط,قطعة,C-2,,,,2026-10-03,30,YER,1,عميل,,ملاحظة,0,0,\n'), 'sale.csv');
     expect(saleOnly.canImport, isFalse);
