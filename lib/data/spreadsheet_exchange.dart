@@ -118,11 +118,14 @@ class SpreadsheetExchange {
     }
     List<List<String>> matrix;
     if (lower.endsWith('.csv')) {
-      final source = utf8.decode(bytes, allowMalformed: false).replaceFirst('\uFEFF', '');
-      matrix = const CsvToListConverter(shouldParseNumbers: false).convert(source)
+      final source = utf8.decode(bytes, allowMalformed: false)
+          .replaceFirst('\uFEFF', '')
+          .replaceAll('\r\n', '\n')
+          .replaceAll('\r', '\n');
+      matrix = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(source)
           .map((row) => row.map((v) => v?.toString() ?? '').toList()).toList();
       if (matrix.isNotEmpty && !_hasHeaders(matrix.first)) {
-        final other = const CsvToListConverter(fieldDelimiter: ';', shouldParseNumbers: false)
+        final other = const CsvToListConverter(fieldDelimiter: ';', shouldParseNumbers: false, eol: '\n')
             .convert(source).map((row) => row.map((v) => v?.toString() ?? '').toList()).toList();
         if (other.isNotEmpty && _hasHeaders(other.first)) matrix = other;
       }
