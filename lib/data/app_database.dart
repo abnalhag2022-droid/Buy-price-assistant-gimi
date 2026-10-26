@@ -241,9 +241,29 @@ class AppDatabase {
       conditions.add("EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND lower(coalesce(pe.supplier, '')) = lower(?))");
       args.add(supplier);
     }
+    final noteChecks = <String>[];
+    final noteArgs = <Object?>[];
+    for (final term in terms) {
+      final notePattern = '%${escapeLikePattern(term)}%';
+      noteChecks.add('''(
+        ${_sqlNormalizeDigits("lower(coalesce(p.notes, ''))")} LIKE ? ESCAPE '!' OR
+        EXISTS (SELECT 1 FROM purchase_entries pn WHERE pn.product_id = p.id AND
+          ${_sqlNormalizeDigits("lower(coalesce(pn.notes, ''))")} LIKE ? ESCAPE '!') OR
+        EXISTS (SELECT 1 FROM sale_entries sn WHERE sn.product_id = p.id AND
+          ${_sqlNormalizeDigits("lower(coalesce(sn.notes, ''))")} LIKE ? ESCAPE '!')
+      )''');
+      noteArgs.addAll(List<Object?>.filled(3, notePattern));
+    }
+    final noteSelect = noteChecks.isEmpty
+        ? '0 AS search_match_notes'
+        : 'CASE WHEN ${noteChecks.join(' OR ')} THEN 1 ELSE 0 END AS search_match_notes';
+    final select = _productSelect().replaceFirst(
+      'FROM products p',
+      ', $noteSelect FROM products p',
+    );
     return db.rawQuery(
-      '${_productSelect()} WHERE ${conditions.join(' AND ')} ORDER BY p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC LIMIT 250',
-      args,
+      '$select WHERE ${conditions.join(' AND ')} ORDER BY p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC LIMIT 250',
+      [...noteArgs, ...args],
     );
   }
 
