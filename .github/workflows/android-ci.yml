@@ -84,7 +84,7 @@ jobs:
           if not app_id:
               raise SystemExit("Could not determine Android applicationId.")
           version = Path("pubspec.yaml").read_text(encoding="utf-8")
-          match = re.search(r"(?m)^version:\s*([^+\s]+)\+(\\d+)\s*$", version)
+          match = re.search(r"(?m)^version:\s*([^+\s]+)\+(\d+)\s*$", version)
           if not match:
               raise SystemExit("pubspec.yaml must define versionName+versionCode.")
           print(f"Android applicationId: {app_id.group(1)}")
