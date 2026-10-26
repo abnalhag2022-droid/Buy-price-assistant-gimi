@@ -101,7 +101,7 @@ class SpreadsheetExchange {
     // Word-order-insensitive matching handles harmless naming rearrangements
     // while retaining all meaningful tokens (including model/diameter numbers).
     final tokens = normalizeForSearch(name)
-        .split(RegExp(r'\\s+'))
+        .split(RegExp(r'\s+'))
         .where((token) => token.isNotEmpty)
         .toList()
       ..sort();
