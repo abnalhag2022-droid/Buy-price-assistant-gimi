@@ -1,7 +1,7 @@
 name: buy_price_assistant_gimi
 description: Arabic-first offline purchase and sales price history assistant.
 publish_to: 'none'
-version: 1.3.0+5
+version: 1.4.0+6
 environment:
   sdk: '>=3.11.0 <4.0.0'
 
