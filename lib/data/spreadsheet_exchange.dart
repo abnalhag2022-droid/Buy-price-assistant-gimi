@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:csv/csv.dart';
-import 'package:excel_community/excel.dart';
+import 'package:excel_community/excel_community.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../state/app_settings.dart';
