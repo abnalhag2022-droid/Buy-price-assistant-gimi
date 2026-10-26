@@ -9,6 +9,8 @@ import 'product_details_screen.dart';
 import 'product_form_screen.dart';
 import 'backup_restore_screen.dart';
 import 'settings_screen.dart';
+import 'data_exchange_screen.dart';
+import 'support_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,11 +23,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
   late Future<List<Map<String, Object?>>> _productsFuture;
   String _query = '';
+  String? _categoryFilter;
+  late Future<List<String>> _categoriesFuture;
 
   @override
   void initState() {
     super.initState();
     _productsFuture = AppDatabase.instance.searchProducts('');
+    _categoriesFuture = AppDatabase.instance.getDistinctCategories();
   }
 
   @override
@@ -36,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _reload([String? query]) {
     if (query != null) _query = query;
-    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query));
+    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query, category: _categoryFilter));
   }
 
   Future<void> _addProduct() async {
@@ -71,34 +76,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
+        leading: Builder(builder: (context) => IconButton(
+          tooltip: appTextValue('القائمة', 'Menu'),
+          icon: const Icon(Icons.menu_rounded),
+          onPressed: () => Scaffold.of(context).openDrawer(),
+        )),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const AppText(ar: 'مرجع أسعار الأصناف', en: 'Item price reference', style: TextStyle(fontWeight: FontWeight.w800)),
-            Text('Buy Price Assistant GIMI', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Text('Buy Price Assistant HJI', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: appTextValue('الإعدادات', 'Settings'),
-            onPressed: () async {
-              await Navigator.of(context).push<void>(
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-              if (mounted) _reload();
-            },
-            icon: const Icon(Icons.settings_outlined),
-          ),
-          IconButton(
-            tooltip: appTextValue('النسخ الاحتياطي والاستعادة', 'Backup and restore'),
-            onPressed: () async {
-              await Navigator.of(context).push<void>(
-                MaterialPageRoute(builder: (_) => const BackupRestoreScreen()),
-              );
-              if (mounted) _reload();
-            },
-            icon: const Icon(Icons.backup_outlined),
-          ),
           IconButton(
             tooltip: appTextValue('إضافة صنف', 'Add item'),
             onPressed: _addProduct,
@@ -106,6 +96,55 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(width: 6),
         ],
+      ),
+      drawer: Drawer(
+        width: MediaQuery.sizeOf(context).width * 0.80,
+        child: SafeArea(child: Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.tertiary],
+                begin: Alignment.topRight, end: Alignment.bottomLeft,
+              ),
+            ),
+            child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.receipt_long_rounded, size: 42, color: Colors.white),
+              SizedBox(height: 14),
+              Text('Buy Price Assistant HJI', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+              SizedBox(height: 4),
+              Text('Purchase • Sales • Price history', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ]),
+          ),
+          Expanded(child: ListView(padding: const EdgeInsets.symmetric(vertical: 8), children: [
+            _drawerItem(context, Icons.inventory_2_outlined, 'الأصناف', 'Items', () => Navigator.pop(context)),
+            _drawerItem(context, Icons.tune_rounded, 'الإعدادات والتصنيفات', 'Settings and categories', () async {
+              Navigator.pop(context);
+              await Navigator.of(this.context).push<void>(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              if (mounted) _reload();
+            }),
+            _drawerItem(context, Icons.backup_outlined, 'النسخ الاحتياطي والاستعادة', 'Backup and restore', () async {
+              Navigator.pop(context);
+              await Navigator.of(this.context).push<void>(MaterialPageRoute(builder: (_) => const BackupRestoreScreen()));
+              if (mounted) _reload();
+            }),
+            _drawerItem(context, Icons.import_export_rounded, 'استيراد وتصدير Excel وCSV', 'Excel / CSV import and export', () async {
+              Navigator.pop(context);
+              await Navigator.of(this.context).push<void>(MaterialPageRoute(builder: (_) => const DataExchangeScreen()));
+              if (mounted) _reload();
+            }),
+            _drawerItem(context, Icons.support_agent_rounded, 'الدعم والتواصل', 'Support and contact', () {
+              Navigator.pop(context);
+              Navigator.of(this.context).push<void>(MaterialPageRoute(builder: (_) => const SupportScreen()));
+            }),
+            const Divider(indent: 18, endIndent: 18),
+            Padding(padding: const EdgeInsets.all(18), child: Text(
+              appTextValue('بحث أسرع • سجل أسعار محفوظ • يعمل دون إنترنت', 'Faster search • Saved price history • Works offline'),
+              style: Theme.of(context).textTheme.bodySmall,
+            )),
+          ])),
+        ])),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addProduct,
@@ -138,6 +177,32 @@ class _HomeScreenState extends State<HomeScreen> {
                               icon: const Icon(Icons.close),
                             ),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  FutureBuilder<List<String>>(
+                    future: _categoriesFuture,
+                    builder: (context, snapshot) {
+                      final categories = snapshot.data ?? const <String>[];
+                      return DropdownButtonFormField<String>(
+                        value: _categoryFilter,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: appTextValue('تصفية حسب التصنيف', 'Filter by category'),
+                          prefixIcon: const Icon(Icons.filter_list_rounded),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        items: [
+                          DropdownMenuItem<String>(value: null, child: AppText(ar: 'كل التصنيفات', en: 'All categories')),
+                          ...categories.map((value) => DropdownMenuItem<String>(
+                            value: value, child: Text(localizeCatalogValue(context, value), overflow: TextOverflow.ellipsis),
+                          )),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _categoryFilter = value);
+                          _reload();
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -224,6 +289,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
+Widget _drawerItem(BuildContext context, IconData icon, String ar, String en, VoidCallback onTap) =>
+    ListTile(
+      leading: Icon(icon),
+      title: AppText(ar: ar, en: en),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
+    );
 
 class _ProductCard extends StatelessWidget {
   const _ProductCard({
