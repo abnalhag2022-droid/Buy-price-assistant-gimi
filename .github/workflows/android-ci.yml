@@ -80,11 +80,11 @@ jobs:
           if gradle is None:
               raise SystemExit("Android app Gradle file was not generated.")
           source = gradle.read_text(encoding="utf-8")
-          app_id = re.search(r'applicationId\\s*(?:=\\s*)?["\\']([^"\\']+)["\\']', source)
+          app_id = re.search(r'applicationId\s*(?:=\s*)?["\']([^"\']+)["\']', source)
           if not app_id:
               raise SystemExit("Could not determine Android applicationId.")
           version = Path("pubspec.yaml").read_text(encoding="utf-8")
-          match = re.search(r"(?m)^version:\\s*([^+\\s]+)\\+(\\d+)\\s*$", version)
+          match = re.search(r"(?m)^version:\s*([^+\s]+)\+(\\d+)\s*$", version)
           if not match:
               raise SystemExit("pubspec.yaml must define versionName+versionCode.")
           print(f"Android applicationId: {app_id.group(1)}")
@@ -129,12 +129,12 @@ jobs:
           def esc(s):
               out = []
               for i, ch in enumerate(s):
-                  if ch == '\\': out.append('\\\\')
+                  if ch == '\': out.append('\\\')
                   elif ch == '\t': out.append('\\t')
                   elif ch == '\n': out.append('\\n')
                   elif ch == '\r': out.append('\\r')
                   elif ch in '=:#!' or (ch == ' ' and i == 0):
-                      out.append('\\' + ch)
+                      out.append('\' + ch)
                   else:
                       out.append(ch)
               return ''.join(out)
