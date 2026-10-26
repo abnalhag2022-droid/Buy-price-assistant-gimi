@@ -31,7 +31,7 @@ void main() {
 
   test('matches existing product by normalized name and unit without overwriting metadata', () async {
     final id = await db.saveProduct(name: 'محول شمسي', unit: 'قطعة', code: 'OLD', category: 'قديم');
-    final source = '${header}PURCHASE,مُحَوِّل شمسي,قطعة,NEW,جديد,,ملاحظة,2026-10-01,100,USD,2,مورد,INV-1,ملاحظة عملية,0,0,\n';
+    final source = '${header}PURCHASE,شمسي محول,قطعة,NEW,جديد,,ملاحظة,2026-10-01,100,USD,2,مورد,INV-1,ملاحظة عملية,0,0,\n';
     final preview = await exchange.previewBytes(bytes(source), 'history.csv');
     expect(preview.canImport, isTrue, reason: "valid=${preview.validTransactionCount}; errors=${preview.errorCount}; issues=${preview.issues.map((i) => i.message).join(" | ")}; rows=${preview.rows.map((r) => "type=${r.type}, hasTx=${r.hasTransaction}, date=${r.date}, price=${r.price}, quantity=${r.quantity}, errors=${r.errors.join(",")}").join(" || ")}");
     expect(preview.matchedProducts, 1);
