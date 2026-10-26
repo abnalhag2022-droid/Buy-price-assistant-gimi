@@ -140,6 +140,37 @@ def main() -> None:
     )
     if count != 1:
         raise SystemExit("Could not safely set the Android application label.")
+    # Use a purpose-built vector launcher icon (receipt + currency symbol).
+    resources = ANDROID_DIR / "app" / "src" / "main" / "res"
+    drawable_dir = resources / "drawable"
+    drawable_dir.mkdir(parents=True, exist_ok=True)
+    icon = drawable_dir / "hji_launcher_icon.xml"
+    icon.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#18365F" android:pathData="M0,0h108v108h-108z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M25,20h45a5,5 0,0 1,5 5v55l-8,-5 -8,5 -8,-5 -8,5 -8,-5 -10,5z"/>
+    <path android:fillColor="#18365F" android:pathData="M35,31h25v4h-25zM35,42h25v4h-25zM35,53h18v4h-18z"/>
+    <path android:fillColor="#F6C453" android:pathData="M75,49a22,22 0,1 0,0.1 0z"/>
+    <path android:fillColor="#18365F" android:pathData="M83,39c-2,-3 -5,-5 -9,-5 -6,0 -10,3 -10,8 0,5 4,7 10,9 4,1 5,2 5,4 0,2 -2,4 -6,4 -4,0 -7,-2 -9,-4l-3,4c2,3 5,5 9,6v5h5v-5c6,-1 9,-5 9,-10 0,-5 -4,-8 -10,-10 -4,-1 -5,-2 -5,-3 0,-2 2,-3 5,-3 3,0 5,1 7,3z"/>
+</vector>
+""", encoding="utf-8")
+    # Android supports vector drawables directly as launcher icons.
+    updated, icon_count = re.subn(
+        r'android:icon="@[^"]+"',
+        'android:icon="@drawable/hji_launcher_icon"',
+        updated,
+        count=1,
+    )
+    if icon_count != 1:
+        raise SystemExit("Could not safely configure the launcher icon.")
+    updated = re.sub(
+        r'android:roundIcon="@[^"]+"',
+        'android:roundIcon="@drawable/hji_launcher_icon"',
+        updated,
+        count=1,
+    )
     manifest.write_text(updated, encoding="utf-8")
     configure_gradle_signing()
     print("Android scaffolding and signing support are ready.")
