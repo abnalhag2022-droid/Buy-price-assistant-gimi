@@ -190,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     builder: (context, snapshot) {
                       final categories = snapshot.data ?? const <String>[];
                       return DropdownButtonFormField<String>(
-                        value: _categoryFilter,
+                        initialValue: _categoryFilter,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: appTextValue('تصفية حسب التصنيف', 'Filter by category'),
@@ -217,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context, snapshot) {
                         final values = snapshot.data ?? const <String>[];
                         return DropdownButtonFormField<String>(
-                          value: _brandFilter,
+                          initialValue: _brandFilter,
                           isExpanded: true,
                           decoration: InputDecoration(
                             labelText: appTextValue('العلامة التجارية', 'Brand'),
@@ -237,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context, snapshot) {
                         final values = snapshot.data ?? const <String>[];
                         return DropdownButtonFormField<String>(
-                          value: _supplierFilter,
+                          initialValue: _supplierFilter,
                           isExpanded: true,
                           decoration: InputDecoration(
                             labelText: appTextValue('المورد', 'Supplier'),
