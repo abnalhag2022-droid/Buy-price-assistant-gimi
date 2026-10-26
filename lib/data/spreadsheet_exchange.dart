@@ -97,8 +97,16 @@ class SpreadsheetExchange {
     return v.length > 1 && v.startsWith("'") && '=+-@'.contains(v[1]) ? v.substring(1) : v;
   }
 
-  static String _key(String name, String unit) =>
-      '${normalizeForSearch(name)}\u001f${normalizeForSearch(unit)}';
+  static String _key(String name, String unit) {
+    // Word-order-insensitive matching handles harmless naming rearrangements
+    // while retaining all meaningful tokens (including model/diameter numbers).
+    final tokens = normalizeForSearch(name)
+        .split(RegExp(r'\\s+'))
+        .where((token) => token.isNotEmpty)
+        .toList()
+      ..sort();
+    return '${tokens.join(' ')}\u001f${normalizeForSearch(unit)}';
+  }
   static String? _nullable(String s) => s.trim().isEmpty ? null : s.trim();
   static bool _flag(String s) => const {'1', 'true', 'yes', 'y', 'نعم'}.contains(normalizeForSearch(s));
 
