@@ -126,18 +126,26 @@ jobs:
           import os
           from pathlib import Path
 
-          def esc(s):
+          BS = chr(92)
+
+          def esc(value):
               out = []
-              for i, ch in enumerate(s):
-                  if ch == '\': out.append('\\\')
-                  elif ch == '\t': out.append('\\t')
-                  elif ch == '\n': out.append('\\n')
-                  elif ch == '\r': out.append('\\r')
-                  elif ch in '=:#!' or (ch == ' ' and i == 0):
-                      out.append('\' + ch)
+              for i, ch in enumerate(value):
+                  if ch == BS:
+                      out.append(BS + BS)
+                  elif ch == "\t":
+                      out.append(BS + "t")
+                  elif ch == "\n":
+                      out.append(BS + "n")
+                  elif ch == "\r":
+                      out.append(BS + "r")
+                  elif ch in "=:#!":
+                      out.append(BS + ch)
+                  elif ch == " " and i == 0:
+                      out.append(BS + ch)
                   else:
                       out.append(ch)
-              return ''.join(out)
+              return "".join(out)
 
           values = {
               "storePassword": os.environ["ANDROID_KEYSTORE_PASSWORD"],
@@ -147,7 +155,7 @@ jobs:
           }
           target = Path("android/key.properties")
           target.write_text(
-              ''.join(f"{k}={esc(v)}\n" for k, v in values.items()),
+              "".join(f"{key}={esc(value)}\\n" for key, value in values.items()),
               encoding="utf-8",
           )
           PY
