@@ -155,7 +155,7 @@ jobs:
           }
           target = Path("android/key.properties")
           target.write_text(
-              "".join(f"{key}={esc(value)}\\n" for key, value in values.items()),
+              "".join(f"{key}={esc(value)}\n" for key, value in values.items()),
               encoding="utf-8",
           )
           PY
