@@ -79,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
         leading: Builder(builder: (context) => IconButton(
           tooltip: appTextValue('القائمة', 'Menu'),
           icon: const Icon(Icons.menu_rounded),
-          onPressed: () => Scaffold.of(context).openDrawer(),
+          onPressed: () => Scaffold.of(context).openEndDrawer(),
         )),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 6),
         ],
       ),
-      drawer: Drawer(
+      endDrawer: Drawer(
         width: MediaQuery.sizeOf(context).width * 0.80,
         child: SafeArea(child: Column(children: [
           Container(
