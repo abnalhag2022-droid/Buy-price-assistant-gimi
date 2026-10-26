@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-fast structural, spreadsheet, and SQLite checks for GIMI 1.3.0."""
+"""Fail-fast structural, spreadsheet, and SQLite checks for HJI 1.4.0."""
 from __future__ import annotations
 
 import re
@@ -41,7 +41,7 @@ def main() -> int:
     exchange_screen = source("lib/screens/data_exchange_screen.dart")
     support_screen = source("lib/screens/support_screen.dart")
 
-    require(bool(re.search(r"(?m)^version:\s*1\.3\.0\+5\s*$", pubspec)), "version is 1.3.0+5")
+    require(bool(re.search(r"(?m)^version:\s*1\.4\.0\+6\s*$", pubspec)), "version is 1.4.0+6")
     require("excel: ^4.0.6" in pubspec and "csv: ^6.0.0" in pubspec, "Excel and CSV dependencies are declared")
     require("url_launcher: ^6.3.2" in pubspec, "support link dependency is declared")
     require("transaction((txn) async" in spreadsheet and "confirmDuplicates" in spreadsheet, "spreadsheet imports use preview and one atomic transaction")
@@ -51,10 +51,13 @@ def main() -> int:
     require("DataExchangeScreen" in exchange_screen and "SupportScreen" in support_screen, "data exchange and support screens are included")
     require("https://wa.me/967773436537" in support_screen and "abnalhag2022@gmail.com" in support_screen, "support contacts match approved details")
     require("shared_preferences: ^2.5.6" in pubspec, "persistent settings dependency is declared")
-    require("static const _databaseVersion = 2;" in database and "onUpgrade: _upgradeSchema" in database, "database v1-to-v2 migration is wired")
+    require("static const _databaseVersion = 3;" in database and "onUpgrade: _upgradeSchema" in database, "database v1-to-v3 migration is wired")
     require("currency_code TEXT NOT NULL DEFAULT 'YER'" in database, "new currency column defaults legacy records to YER")
     require("currency_code = 'YER'" in database or "_validatedCurrency(currencyCode)" in database, "currency writes are validated")
     require("suggestProductNames" in database and "findExactProductName" in database, "local name suggestions and duplicate lookup exist")
+    require("normalizeForSearch" in database and "_sqlNormalizeDigits" in database, "digit-normalized search is enabled")
+    require("search_match_notes" in database and "purchase_entries pn" in database and "sale_entries sn" in database, "note matches are exposed for search highlighting")
+    require("getDistinctBrands" in database and "getDistinctSuppliers" in database, "brand and supplier filter queries exist")
     require("decoded['schemaVersion'] == 1 || decoded['schemaVersion'] == 2" in database, "backup restore accepts v1 and v2 archives")
     require("putIfAbsent('currency_code', () => 'YER')" in database, "legacy backup rows receive YER before validation")
     require("currencyCode: _currency" in entries and "_currency = AppSettings.instance.currency" in entries, "new transactions store the selected/default currency")
