@@ -32,7 +32,7 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
       final extension = excel ? 'xlsx' : 'csv';
       final path = await FilePicker.platform.saveFile(
         dialogTitle: appTextValue('حفظ ملف التصدير', 'Save export file'),
-        fileName: 'gimi_data_$stamp.$extension',
+        fileName: 'hji_data_$stamp.$extension',
         type: FileType.custom,
         allowedExtensions: [extension],
         bytes: bytes,
