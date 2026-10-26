@@ -318,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) => _ProductCard(
                         product: Product.fromMap(rows[index]),
+                        matchFromNotes: (rows[index]['search_match_notes'] as num? ?? 0) == 1 && _query.trim().isNotEmpty,
                         onOpen: () => _openProduct(Product.fromMap(rows[index])),
                         onFavorite: (favorite) async {
                           await AppDatabase.instance.setFavorite(rows[index]['id']! as int, favorite);
@@ -349,6 +350,7 @@ Widget _drawerItem(BuildContext context, IconData icon, String ar, String en, Vo
 class _ProductCard extends StatelessWidget {
   const _ProductCard({
     required this.product,
+    required this.matchFromNotes,
     required this.onOpen,
     required this.onFavorite,
     required this.onPurchase,
@@ -356,6 +358,7 @@ class _ProductCard extends StatelessWidget {
   });
 
   final Product product;
+  final bool matchFromNotes;
   final VoidCallback onOpen;
   final ValueChanged<bool> onFavorite;
   final VoidCallback onPurchase;
@@ -397,6 +400,25 @@ class _ProductCard extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (matchFromNotes) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.tertiaryContainer.withValues(alpha: 0.72),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.sticky_note_2_outlined, size: 13, color: Theme.of(context).colorScheme.onTertiaryContainer),
+                              const SizedBox(width: 5),
+                              AppText(
+                                ar: 'تطابق في الملاحظات',
+                                en: 'Match in notes',
+                                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onTertiaryContainer, fontWeight: FontWeight.w600),
+                              ),
+                            ]),
+                          ),
+                        ],
                       ],
                     ),
                   ),
