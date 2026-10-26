@@ -24,13 +24,19 @@ class _HomeScreenState extends State<HomeScreen> {
   late Future<List<Map<String, Object?>>> _productsFuture;
   String _query = '';
   String? _categoryFilter;
+  String? _brandFilter;
+  String? _supplierFilter;
   late Future<List<String>> _categoriesFuture;
+  late Future<List<String>> _brandsFuture;
+  late Future<List<String>> _suppliersFuture;
 
   @override
   void initState() {
     super.initState();
     _productsFuture = AppDatabase.instance.searchProducts('');
     _categoriesFuture = AppDatabase.instance.getDistinctCategories();
+    _brandsFuture = AppDatabase.instance.getDistinctBrands();
+    _suppliersFuture = AppDatabase.instance.getDistinctSuppliers();
   }
 
   @override
@@ -41,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _reload([String? query]) {
     if (query != null) _query = query;
-    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query, category: _categoryFilter));
+    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query, category: _categoryFilter, brand: _brandFilter, supplier: _supplierFilter));
   }
 
   Future<void> _addProduct() async {
@@ -204,6 +210,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                   ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: FutureBuilder<List<String>>(
+                      future: _brandsFuture,
+                      builder: (context, snapshot) {
+                        final values = snapshot.data ?? const <String>[];
+                        return DropdownButtonFormField<String>(
+                          value: _brandFilter,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: appTextValue('العلامة التجارية', 'Brand'),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          ),
+                          items: [
+                            DropdownMenuItem<String>(value: null, child: AppText(ar: 'كل العلامات', en: 'All brands')),
+                            ...values.map((v) => DropdownMenuItem<String>(value: v, child: Text(v, overflow: TextOverflow.ellipsis))),
+                          ],
+                          onChanged: (v) { setState(() => _brandFilter = v); _reload(); },
+                        );
+                      },
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(child: FutureBuilder<List<String>>(
+                      future: _suppliersFuture,
+                      builder: (context, snapshot) {
+                        final values = snapshot.data ?? const <String>[];
+                        return DropdownButtonFormField<String>(
+                          value: _supplierFilter,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: appTextValue('المورد', 'Supplier'),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          ),
+                          items: [
+                            DropdownMenuItem<String>(value: null, child: AppText(ar: 'كل الموردين', en: 'All suppliers')),
+                            ...values.map((v) => DropdownMenuItem<String>(value: v, child: Text(v, overflow: TextOverflow.ellipsis))),
+                          ],
+                          onChanged: (v) { setState(() => _supplierFilter = v); _reload(); },
+                        );
+                      },
+                    )),
+                  ]),
                   const SizedBox(height: 12),
                   Row(
                     children: [
