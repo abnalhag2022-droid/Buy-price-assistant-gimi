@@ -178,20 +178,70 @@ class AppDatabase {
     FROM products p
   ''';
 
-  Future<List<Map<String, Object?>>> searchProducts(String query) async {
+  Future<List<Map<String, Object?>>> searchProducts(
+    String query, {
+    String? category,
+    String? brand,
+    String? supplier,
+  }) async {
     final db = await database;
     final normalized = normalizeForSearch(query);
-    final pattern = '%${escapeLikePattern(normalized)}%';
+    final terms = normalized.split(RegExp(r'\\s+')).where((v) => v.isNotEmpty).toList();
+    final args = <Object?>[];
+    final conditions = <String>['p.is_archived = 0'];
+    for (final term in terms) {
+      final termPattern = '%${escapeLikePattern(term)}%';
+      conditions.add('''(
+        p.search_name LIKE ? ESCAPE '!' OR p.search_code LIKE ? ESCAPE '!' OR
+        p.search_category LIKE ? ESCAPE '!' OR lower(coalesce(p.brand, '')) LIKE ? ESCAPE '!' OR
+        lower(coalesce(p.notes, '')) LIKE ? ESCAPE '!' OR
+        EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND (
+          lower(coalesce(pe.supplier, '')) LIKE ? ESCAPE '!' OR
+          lower(coalesce(pe.notes, '')) LIKE ? ESCAPE '!' OR
+          coalesce(pe.purchase_date, '') LIKE ? ESCAPE '!' OR cast(pe.unit_price as text) LIKE ? ESCAPE '!')) OR
+        EXISTS (SELECT 1 FROM sale_entries se WHERE se.product_id = p.id AND (
+          lower(coalesce(se.customer, '')) LIKE ? ESCAPE '!' OR
+          lower(coalesce(se.notes, '')) LIKE ? ESCAPE '!' OR
+          coalesce(se.sale_date, '') LIKE ? ESCAPE '!' OR cast(se.unit_price as text) LIKE ? ESCAPE '!'))
+      )''');
+      args.addAll(List<Object?>.filled(5, termPattern));
+      args.addAll(List<Object?>.filled(4, termPattern));
+      args.addAll(List<Object?>.filled(4, termPattern));
+    }
+    if (category != null && category.isNotEmpty) {
+      conditions.add('p.search_category = ?');
+      args.add(normalizeForSearch(category));
+    }
+    if (brand != null && brand.isNotEmpty) {
+      conditions.add('lower(coalesce(p.brand, "")) = lower(?)');
+      args.add(brand);
+    }
+    if (supplier != null && supplier.isNotEmpty) {
+      conditions.add("EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND lower(coalesce(pe.supplier, '')) = lower(?))");
+      args.add(supplier);
+    }
     return db.rawQuery(
-      '''${_productSelect()}
-         WHERE p.is_archived = 0
-           AND (? = '' OR p.search_name LIKE ? ESCAPE '!'
-             OR p.search_code LIKE ? ESCAPE '!'
-             OR p.search_category LIKE ? ESCAPE '!')
-         ORDER BY p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC
-         LIMIT 250''',
-      [normalized, pattern, pattern, pattern],
+      '${_productSelect()} WHERE ${conditions.join(' AND ')} ORDER BY p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC LIMIT 250',
+      args,
     );
+  }
+
+  Future<List<String>> getDistinctBrands() async {
+    final db = await database;
+    final rows = await db.rawQuery("SELECT DISTINCT brand FROM products WHERE is_archived = 0 AND brand IS NOT NULL AND trim(brand) <> '' ORDER BY brand COLLATE NOCASE");
+    return rows.map((r) => r['brand']! as String).toList();
+  }
+
+  Future<List<String>> getDistinctSuppliers() async {
+    final db = await database;
+    final rows = await db.rawQuery("SELECT DISTINCT supplier FROM purchase_entries WHERE supplier IS NOT NULL AND trim(supplier) <> '' ORDER BY supplier COLLATE NOCASE");
+    return rows.map((r) => r['supplier']! as String).toList();
+  }
+
+  Future<List<String>> getDistinctCategories() async {
+    final db = await database;
+    final rows = await db.rawQuery("SELECT DISTINCT category FROM products WHERE is_archived = 0 AND category IS NOT NULL AND trim(category) <> '' ORDER BY category COLLATE NOCASE");
+    return rows.map((r) => r['category']! as String).toList();
   }
 
   /// Suggestions include archived products so staff can reuse established naming patterns.
