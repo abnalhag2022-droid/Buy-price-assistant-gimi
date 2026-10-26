@@ -219,4 +219,20 @@ void main() {
     expect(await db.getSaleHistory(productId), isEmpty);
   });
 
+  test('search treats Arabic-Indic and English digits as equivalent', () async {
+    await db.saveProduct(name: 'غطاس ٥٥ كيلوواط فانسان', unit: 'حبة');
+    expect(await db.searchProducts('غطاس 55 كيلوواط فانسان'), hasLength(1));
+    expect(await db.searchProducts('غطاس ٥٥ كيلوواط فانسان'), hasLength(1));
+  });
+
+  test('search finds purchase notes and supplier names', () async {
+    final id = await db.saveProduct(name: 'غطاس اختبار', unit: 'حبة');
+    await db.recordPurchase(
+      productId: id, date: '2026-10-01', unitPrice: 100, quantity: 1,
+      supplier: 'المورد المكيس', notes: 'قطر ٧ هنش',
+    );
+    expect(await db.searchProducts('المكيس'), hasLength(1));
+    expect(await db.searchProducts('قطر'), hasLength(1));
+  });
+
 }
