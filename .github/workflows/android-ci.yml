@@ -66,6 +66,33 @@ jobs:
       - name: Generate Android platform files
         run: python3 tool/prepare_android.py
 
+      - name: Verify Android package and release version
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          gradle_candidates = [
+              Path("android/app/build.gradle.kts"),
+              Path("android/app/build.gradle"),
+          ]
+          gradle = next((p for p in gradle_candidates if p.is_file()), None)
+          if gradle is None:
+              raise SystemExit("Android app Gradle file was not generated.")
+          source = gradle.read_text(encoding="utf-8")
+          app_id = re.search(r'applicationId\\s*(?:=\\s*)?["\\']([^"\\']+)["\\']', source)
+          if not app_id:
+              raise SystemExit("Could not determine Android applicationId.")
+          version = Path("pubspec.yaml").read_text(encoding="utf-8")
+          match = re.search(r"(?m)^version:\\s*([^+\\s]+)\\+(\\d+)\\s*$", version)
+          if not match:
+              raise SystemExit("pubspec.yaml must define versionName+versionCode.")
+          print(f"Android applicationId: {app_id.group(1)}")
+          print(f"Flutter versionName: {match.group(1)}")
+          print(f"Flutter versionCode: {match.group(2)}")
+          PY
+
+
       # Only trusted push/manual runs receive secrets. Pull requests build without release secrets.
       - name: Prepare release keystore and key.properties
         if: github.event_name != 'pull_request'
