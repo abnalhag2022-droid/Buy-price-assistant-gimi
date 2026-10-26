@@ -209,10 +209,12 @@ jobs:
         run: |
           rm -f android/key.properties "$RUNNER_TEMP/gimi-release.jks"
 
-      - name: Upload APK artifact
+      # Pull-request builds intentionally skip release signing. Do not publish their APK as an installable update.
+      - name: Upload signed release APK artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: buy-price-assistant-gimi-apk-${{ github.run_number }}
+          name: buy-price-assistant-gimi-signed-release-apk-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
