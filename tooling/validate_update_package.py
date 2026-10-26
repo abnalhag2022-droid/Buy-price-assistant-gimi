@@ -41,8 +41,8 @@ def main() -> int:
     exchange_screen = source("lib/screens/data_exchange_screen.dart")
     support_screen = source("lib/screens/support_screen.dart")
 
-    require(bool(re.search(r"(?m)^version:\s*1\.4\.0\+6\s*$", pubspec)), "version is 1.4.0+6")
-    require("excel: ^4.0.6" in pubspec and "csv: ^6.0.0" in pubspec, "Excel and CSV dependencies are declared")
+    require(bool(re.search(r"(?m)^version:\s*1\.4\.0\+7\s*$", pubspec)), "version is 1.4.0+7")
+    require("excel_community: ^2.6.0" in pubspec and "csv: ^6.0.0" in pubspec, "Excel and CSV dependencies are declared")
     require("url_launcher: ^6.3.2" in pubspec, "support link dependency is declared")
     require("transaction((txn) async" in spreadsheet and "confirmDuplicates" in spreadsheet, "spreadsheet imports use preview and one atomic transaction")
     require("restoreBackupJson" not in spreadsheet, "spreadsheet imports do not invoke destructive JSON restore")
