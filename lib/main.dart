@@ -103,7 +103,7 @@ class BuyPriceAssistantApp extends StatelessWidget {
       builder: (context, _) => MaterialApp(
         onGenerateTitle: (_) => settings.isArabic
             ? 'مرجع أسعار الأصناف'
-            : 'Buy Price Assistant GIMI',
+            : 'Buy Price Assistant HJI',
         debugShowCheckedModeBanner: false,
         locale: settings.locale,
         supportedLocales: const [Locale('ar'), Locale('en')],
