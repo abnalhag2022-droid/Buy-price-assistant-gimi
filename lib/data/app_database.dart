@@ -188,6 +188,17 @@ class AppDatabase {
     FROM products p
   ''';
 
+  String _sqlNormalizeDigits(String expression) {
+    const arabic = '٠١٢٣٤٥٦٧٨٩';
+    const persian = '۰۱۲۳۴۵۶۷۸۹';
+    var sql = expression;
+    for (var i = 0; i < 10; i++) {
+      sql = "replace($sql, '${arabic[i]}', '$i')";
+      sql = "replace($sql, '${persian[i]}', '$i')";
+    }
+    return sql;
+  }
+
   Future<List<Map<String, Object?>>> searchProducts(
     String query, {
     String? category,
@@ -203,15 +214,15 @@ class AppDatabase {
       final termPattern = '%${escapeLikePattern(term)}%';
       conditions.add('''(
         p.search_name LIKE ? ESCAPE '!' OR p.search_code LIKE ? ESCAPE '!' OR
-        p.search_category LIKE ? ESCAPE '!' OR lower(coalesce(p.brand, '')) LIKE ? ESCAPE '!' OR
-        lower(coalesce(p.notes, '')) LIKE ? ESCAPE '!' OR
+        p.search_category LIKE ? ESCAPE '!' OR ${_sqlNormalizeDigits("lower(coalesce(p.brand, ''))")} LIKE ? ESCAPE '!' OR
+        ${_sqlNormalizeDigits("lower(coalesce(p.notes, ''))")} LIKE ? ESCAPE '!' OR
         EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND (
-          lower(coalesce(pe.supplier, '')) LIKE ? ESCAPE '!' OR
-          lower(coalesce(pe.notes, '')) LIKE ? ESCAPE '!' OR
+          ${_sqlNormalizeDigits("lower(coalesce(pe.supplier, ''))")} LIKE ? ESCAPE '!' OR
+          ${_sqlNormalizeDigits("lower(coalesce(pe.notes, ''))")} LIKE ? ESCAPE '!' OR
           coalesce(pe.purchase_date, '') LIKE ? ESCAPE '!' OR cast(pe.unit_price as text) LIKE ? ESCAPE '!')) OR
         EXISTS (SELECT 1 FROM sale_entries se WHERE se.product_id = p.id AND (
-          lower(coalesce(se.customer, '')) LIKE ? ESCAPE '!' OR
-          lower(coalesce(se.notes, '')) LIKE ? ESCAPE '!' OR
+          ${_sqlNormalizeDigits("lower(coalesce(se.customer, ''))")} LIKE ? ESCAPE '!' OR
+          ${_sqlNormalizeDigits("lower(coalesce(se.notes, ''))")} LIKE ? ESCAPE '!' OR
           coalesce(se.sale_date, '') LIKE ? ESCAPE '!' OR cast(se.unit_price as text) LIKE ? ESCAPE '!'))
       )''');
       args.addAll(List<Object?>.filled(5, termPattern));
