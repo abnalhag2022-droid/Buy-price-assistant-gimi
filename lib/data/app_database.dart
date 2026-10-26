@@ -16,7 +16,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase();
 
   static const _databaseName = 'buy_price_assistant_gimi.db';
-  static const _databaseVersion = 2;
+  static const _databaseVersion = 3;
 
   final DatabaseFactory _factory;
   final Future<String> Function() _databasePathProvider;
@@ -44,6 +44,16 @@ class AppDatabase {
     if (oldVersion < 2) {
       await db.execute("ALTER TABLE purchase_entries ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'YER'");
       await db.execute("ALTER TABLE sale_entries ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'YER'");
+    }
+    if (oldVersion < 3) {
+      final products = await db.query('products', columns: ['id', 'name', 'code', 'category']);
+      for (final product in products) {
+        await db.update('products', {
+          'search_name': normalizeForSearch(product['name'] as String? ?? ''),
+          'search_code': normalizeForSearch(product['code'] as String? ?? ''),
+          'search_category': normalizeForSearch(product['category'] as String? ?? ''),
+        }, where: 'id = ?', whereArgs: [product['id']]);
+      }
     }
   }
 
