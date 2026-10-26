@@ -11,6 +11,12 @@ String normalizeForSearch(String value) {
       .replaceAll('ؤ', 'و')
       .replaceAll('ئ', 'ي')
       .replaceAll('ى', 'ي')
+      .replaceAll('٠', '0').replaceAll('١', '1').replaceAll('٢', '2')
+      .replaceAll('٣', '3').replaceAll('٤', '4').replaceAll('٥', '5')
+      .replaceAll('٦', '6').replaceAll('٧', '7').replaceAll('٨', '8').replaceAll('٩', '9')
+      .replaceAll('۰', '0').replaceAll('۱', '1').replaceAll('۲', '2')
+      .replaceAll('۳', '3').replaceAll('۴', '4').replaceAll('۵', '5')
+      .replaceAll('۶', '6').replaceAll('۷', '7').replaceAll('۸', '8').replaceAll('۹', '9')
       .trim()
       .replaceAll(RegExp(r'\s+'), ' ');
 }
@@ -84,16 +90,16 @@ String toIsoDate(DateTime date) =>
     '${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
 
-String formatDate(String? isoDate) {
-  if (isoDate == null || isoDate.isEmpty) return 'غير مسجل';
+String formatDate(String? isoDate, [String locale = 'ar']) {
+  if (isoDate == null || isoDate.isEmpty) return locale == 'ar' ? 'غير مسجل' : 'Not recorded';
   final parsed = DateTime.tryParse(isoDate);
   if (parsed == null) return isoDate;
-  return DateFormat('dd/MM/yyyy', 'ar').format(parsed);
+  return DateFormat('dd/MM/yyyy', 'en').format(parsed);
 }
 
-String formatDateTime(String? isoDateTime) {
-  if (isoDateTime == null || isoDateTime.isEmpty) return 'غير مسجل';
+String formatDateTime(String? isoDateTime, [String locale = 'ar']) {
+  if (isoDateTime == null || isoDateTime.isEmpty) return locale == 'ar' ? 'غير مسجل' : 'Not recorded';
   final parsed = DateTime.tryParse(isoDateTime);
   if (parsed == null) return isoDateTime;
-  return DateFormat('dd/MM/yyyy - HH:mm', 'ar').format(parsed);
+  return DateFormat('dd/MM/yyyy - HH:mm', 'en').format(parsed);
 }

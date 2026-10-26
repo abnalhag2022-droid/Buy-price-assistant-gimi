@@ -1,0 +1,24 @@
+LOCAL PREPARATION RESULTS — Buy Price Assistant GIMI 1.1.0+3
+============================================================
+
+PASSED locally:
+- Created a separate candidate tree from a clean 1.0.1+2 / schema-v1 base. The base directory was left unchanged.
+- Python syntax checks passed for apply_update.py, tool/prepare_android.py, validate_update_package.py, and verify_update_sqlite.py.
+- YAML parse passed for pubspec.yaml, analysis_options.yaml, and .github/workflows/android-ci.yml.
+- Structural feature checks passed for app version 1.1.0+3, schema-v2 migration, v1/v2 backup restore, currency fields, product name suggestions, settings, and Dart migration tests being present.
+- SQLite ran the actual CREATE TABLE statements extracted from lib/data/app_database.dart.
+- SQLite migrated representative schema-v1 purchase/sale records and preserved their values; old entries defaulted to YER.
+- SQLite confirmed the latest product-price query returns separate USD/SAR currencies for corresponding purchase/sale records.
+- SQLite rejected unsupported currency EUR.
+- SQLite executed the source name-suggestion SQL and exact-name duplicate lookup successfully.
+- Confirmed the candidate tree contains no .git metadata, key.properties, JKS/keystore, or signing secret files.
+- No git add, git commit, git push, branch update, or GitHub API write was performed.
+
+NOT RUN (requires Flutter/Dart environment and later collaboration):
+- flutter pub get / full dependency resolution against pub.dev.
+- dart format --output=none lib test.
+- flutter analyze.
+- flutter test, including Dart widget/database migration tests.
+- Android generation, release APK build, APK signature verification, and install/device test.
+
+This is a locally validated source candidate, not a claim that GitHub Actions or the Android build passed.

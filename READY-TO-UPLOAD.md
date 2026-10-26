@@ -1,55 +1,23 @@
-# تجهيز Termux — ارفع الملفات الجديدة فقط
+# تسليم المرشح — لا توجد عملية رفع منفذة
 
-## قبل الرفع
+هذه الملفات هي مرشح تحديث محلي للإصدار `1.1.0+3`. أُعدت للمراجعة أولًا، ولا ينبغي تنفيذ أي أوامر Git أو رفع الآن قبل اتفاقنا على الخطوة التالية.
 
-- أنشئ مستودع GitHub فارغًا باسم `Buy-price-assistant-gimi` من حسابك.
-- لا تضف README أو License أثناء إنشاء المستودع لأنهما موجودان هنا.
-- في Termux، انقل ملف ZIP إلى مجلد `Download` أو اعرف مساره قبل فك الضغط.
+## ما بداخل المرشح
 
-## أوامر Termux بعد تنزيل ZIP إلى مجلد Download
+- المصدر الكامل للتطبيق، وليس ملفات التعديل وحدها.
+- ترحيل قاعدة البيانات واختبارات Dart الجديدة.
+- فاحصان محليان: `tooling/validate_update_package.py` و`tooling/verify_update_sqlite.py`.
+- ملفات توثيق التغييرات وخطة الاختبار وتقرير التحقق.
 
-استبدل `/sdcard/Download/Buy-price-assistant-gimi.zip` بالمسار الفعلي إذا كان مختلفًا.
+## التسلسل المتفق عليه للمرحلة التالية
 
-```bash
-pkg update
-pkg install git unzip python -y
-termux-setup-storage
-cd "$HOME"
-if [ -e "$HOME/Buy-price-assistant-gimi" ]; then
-  echo "مجلد Buy-price-assistant-gimi موجود بالفعل؛ أوقف العملية وافحصه قبل المتابعة حتى لا تختلط أي ملفات قديمة بالمشروع الجديد."
-  exit 1
-fi
-mkdir Buy-price-assistant-gimi
-unzip /sdcard/Download/Buy-price-assistant-gimi.zip -d "$HOME"
-cd "$HOME/Buy-price-assistant-gimi"
-```
+1. مراجعة حزمة المصدر وتحديد أن هذه هي نسخة المرشح التي سنستخدمها.
+2. اختيار طريقة النقل إلى بيئة العمل مع إبقاء المصدر السابق نسخة احتياطية.
+3. رفع الملفات وفق الفرع الذي نتفق عليه، دون `git push --force` ودون تغيير الفرع المرجعي عشوائيًا.
+4. مراجعة نتائج GitHub Actions كاملة، خصوصًا `dart format` و`flutter analyze` و`flutter test` وبناء APK والتحقق من توقيعه.
+5. إذا ظهر خطأ، نعالج الخطأ الذي تثبته المخرجات قبل أي محاولة أخرى.
+6. بعد نجاح CI فقط، نجرب APK على الهاتف ونتأكد من ترحيل البيانات والنسخ الاحتياطي.
 
-تأكد أنك داخل مجلد المشروع الجديد وأن ملفات `pubspec.yaml` و`.github/workflows/android-ci.yml` موجودة:
+## تنبيه
 
-```bash
-pwd
-ls -la
-find lib test .github tool -maxdepth 3 -type f
-```
-
-ثم ارفع إلى المستودع الجديد (وليس أي مستودع سابق):
-
-```bash
-git init
-git branch -M main
-git add .
-git status --short
-git commit -m "Initial clean build: Buy Price Assistant GIMI"
-git remote add origin https://github.com/abnalhag2022-droid/Buy-price-assistant-gimi.git
-git push -u origin main
-```
-
-إذا طلب GitHub كلمة مرور عند `git push`، لا تستخدم كلمة مرور حسابك العادية. أكمل مصادقة GitHub عبر طريقة موثوقة سبق أن أعددتها (مثل PAT محفوظ بأمان أو SSH). لا تضع رمز الوصول داخل ملف أو أمر قابل للمشاركة.
-
-إذا أخبر Git أن `origin` موجود مسبقًا، لا تستبدله عشوائيًا. افحصه أولًا:
-
-```bash
-git remote -v
-```
-
-لا تنفذ `git push --force` على هذا المشروع. إذا ظهر خطأ في أي أمر، أرسل مخرجاته قبل تجربة أوامر إضافية.
+لم ينفذ هذا التحديث `git add` أو `git commit` أو `git push` أو إنشاء Pull Request. كما لم يُبنَ APK في بيئة التجهيز.

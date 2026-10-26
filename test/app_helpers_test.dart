@@ -3,6 +3,12 @@ import 'package:buy_price_assistant_gimi/utils/app_helpers.dart';
 
 void main() {
   group('normalizeForSearch', () {
+    test('normalizes Arabic, Persian, and English digits identically', () {
+      expect(normalizeForSearch('غطاس ٥٥'), 'غطاس 55');
+      expect(normalizeForSearch('غطاس ۵۵'), 'غطاس 55');
+      expect(normalizeForSearch('غطاس 55'), 'غطاس 55');
+    });
+
     test('removes Arabic diacritics and normalizes common alef forms', () {
       expect(normalizeForSearch('إِضَاءَة'), 'اضاءة');
       expect(normalizeForSearch('مُحَوِّل'), 'محول');

@@ -11,8 +11,10 @@ class Product {
     this.isArchived = false,
     this.latestPurchasePrice,
     this.latestPurchaseDate,
+    this.latestPurchaseCurrency = 'YER',
     this.latestSalePrice,
     this.latestSaleDate,
+    this.latestSaleCurrency = 'YER',
     this.purchaseCount = 0,
     this.saleCount = 0,
   });
@@ -28,8 +30,10 @@ class Product {
   final bool isArchived;
   final double? latestPurchasePrice;
   final String? latestPurchaseDate;
+  final String? latestPurchaseCurrency;
   final double? latestSalePrice;
   final String? latestSaleDate;
+  final String? latestSaleCurrency;
   final int purchaseCount;
   final int saleCount;
 
@@ -45,8 +49,10 @@ class Product {
         isArchived: ((map['is_archived'] as num?)?.toInt() ?? 0) == 1,
         latestPurchasePrice: (map['latest_purchase_price'] as num?)?.toDouble(),
         latestPurchaseDate: map['latest_purchase_date'] as String?,
+        latestPurchaseCurrency: map['latest_purchase_currency'] as String? ?? 'YER',
         latestSalePrice: (map['latest_sale_price'] as num?)?.toDouble(),
         latestSaleDate: map['latest_sale_date'] as String?,
+        latestSaleCurrency: map['latest_sale_currency'] as String? ?? 'YER',
         purchaseCount: ((map['purchase_count'] as num?)?.toInt() ?? 0),
         saleCount: ((map['sale_count'] as num?)?.toInt() ?? 0),
       );

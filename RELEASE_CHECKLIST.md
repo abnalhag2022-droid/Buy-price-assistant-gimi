@@ -1,18 +1,32 @@
-# Release checklist — Buy Price Assistant GIMI
+# قائمة تحقق الإصدار 1.1.0+3
 
-Do not call a build verified unless every applicable item is checked against actual CI output.
+هذه القائمة لا تعتبر أي خطوة ناجحة إلا بعد مراجعة مخرجاتها الفعلية.
 
-- [ ] Repository is the new `Buy-price-assistant-gimi` repository and contains only newly created project files.
-- [ ] Commit the resolved `pubspec.lock` from the successful CI artifact to pin transitive dependency versions.
-- [ ] `flutter pub get` succeeds on the selected stable Flutter toolchain.
-- [ ] `dart format --output=none --set-exit-if-changed lib test` succeeds.
-- [ ] `flutter analyze --fatal-infos` succeeds with no issues.
-- [ ] `flutter test --reporter expanded` succeeds, including the SQLite history/search/archiving tests.
-- [ ] `tool/prepare_android.py` generates Android scaffolding without overwriting existing files.
-- [ ] `flutter build apk --release` succeeds.
-- [ ] The expected APK exists and is non-empty.
-- [ ] APK installed and opened on a real Android phone.
-- [ ] Manually tested add product, partial search, Arabic digits, purchase history, sale history, app restart persistence, favorite, edit, and archive.
-- [ ] Before commercial use: add and test backup/restore and verify recovery from a fresh install.
+## مراجعة قبل الرفع — لم تُنفذ بعد
+- [ ] راجع كل ملف في المرشح مقابل قائمة التغييرات.
+- [ ] تأكد أن النسخة الأصلية وبيانات الهاتف لم تتعرض لأي تعديل.
+- [ ] راجع تغييرات `pubspec.yaml` و`lib/data/app_database.dart` واختبارات الترحيل.
+- [ ] احتفظ بنسخة احتياطية فعلية قبل تجربة التحديث على هاتف يحتوي بيانات مهمة.
+- [ ] اتفق مع صاحب المشروع على الفرع المستهدف قبل أي عملية Git.
 
-CI green alone does not replace installing and testing the APK on a device.
+## بوابات CI — مؤجلة للمرحلة المشتركة
+- [ ] `flutter pub get`.
+- [ ] `dart format --output=none lib test`.
+- [ ] `flutter analyze`.
+- [ ] `flutter test --reporter expanded`.
+- [ ] فحوص SQLite المضافة تنتهي بنجاح.
+- [ ] `tool/prepare_android.py`.
+- [ ] `flutter build apk --release`.
+- [ ] وجود APK غير فارغ والتحقق من التوقيع إذا كانت أسرار الإصدار متاحة.
+
+## اختبار على الجهاز — بعد نجاح CI فقط
+- [ ] الترقية فوق نسخة سابقة ووجود سجلات فعلية.
+- [ ] تبديل العربية/الإنجليزية وإعادة فتح التطبيق.
+- [ ] تبديل الثيم الفاتح/الأسود.
+- [ ] تسجيل عمليات بعملات YER وSAR وUSD ومراجعة التاريخ.
+- [ ] البحث الجزئي والاسم المكرر والاسم المؤرشف.
+- [ ] تصدير نسخة حديثة واستعادتها، ثم تجربة نسخة قديمة.
+- [ ] رفض ملف احتياطي تالف دون فقد البيانات الحالية.
+- [ ] إغلاق التطبيق بالقوة وإعادة فتحه والتحقق من الإعدادات والسجلات.
+
+لا يكفي نجاح CI وحده لاعتماد التطبيق تجاريًا؛ يلزم اختبار APK حقيقيًا على الهاتف.

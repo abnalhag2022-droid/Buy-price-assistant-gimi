@@ -1,0 +1,19 @@
+PASS pubspec.yaml: version: 1.1.0+3
+PASS pubspec.yaml: shared_preferences: ^2.5.6
+PASS lib/main.dart: AppSettings.instance.load()
+PASS lib/data/app_database.dart: static const _databaseVersion = 2;
+PASS lib/data/app_database.dart: onUpgrade: _upgradeSchema
+PASS lib/data/app_database.dart: suggestProductNames
+PASS lib/data/app_database.dart: 'schemaVersion': 2
+PASS lib/state/app_settings.dart: validateBackupSettings
+PASS lib/utils/app_text.dart: currencyLabel
+PASS lib/screens/settings_screen.dart: Application language
+PASS lib/screens/product_form_screen.dart: suggestProductNames
+PASS lib/screens/price_entry_form_screen.dart: currencyCode: _currency
+PASS lib/screens/backup_restore_screen.dart: exportSettings()
+PASS test/app_database_test.dart: stores a transaction currency
+PASS test/app_settings_test.dart: persists language, theme, and preferred currency
+PASS test/database_migration_test.dart: upgrades schema v1 without losing saved records
+PASS tooling/validate_update_package.py: SQLite migration preserves existing purchase/sale values
+PASS docs/UPDATE_V1.1.0_README_AR.md: لا تنفّذ `git add`
+PASS docs/UPDATE_V1.1.0_LOCAL_RESULTS.txt: SQLite migrated representative schema-v1 purchase/sale records
