@@ -13,7 +13,7 @@ ANDROID_DIR = ROOT / "android"
 APP_DIR = ANDROID_DIR / "app"
 PROJECT_NAME = "buy_price_assistant_gimi"
 ORG = "com.abnalhag.gimi"
-DISPLAY_NAME = "Buy Price Assistant GIMI"
+DISPLAY_NAME = "Buy Price Assistant HJI"
 
 
 def configure_gradle_signing() -> None:
