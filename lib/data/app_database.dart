@@ -207,7 +207,7 @@ class AppDatabase {
   }) async {
     final db = await database;
     final normalized = normalizeForSearch(query);
-    final terms = normalized.split(RegExp(r'\\s+')).where((v) => v.isNotEmpty).toList();
+    final terms = normalized.split(RegExp(r'\s+')).where((v) => v.isNotEmpty).toList();
     final args = <Object?>[];
     final conditions = <String>['p.is_archived = 0'];
     for (final term in terms) {
