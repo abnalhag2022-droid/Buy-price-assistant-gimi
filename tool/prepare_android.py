@@ -152,7 +152,7 @@ def main() -> None:
     <path android:fillColor="#18365F" android:pathData="M0,0h108v108h-108z"/>
     <path android:fillColor="#FFFFFF" android:pathData="M25,20h45a5,5 0,0 1,5 5v55l-8,-5 -8,5 -8,-5 -8,5 -8,-5 -10,5z"/>
     <path android:fillColor="#18365F" android:pathData="M35,31h25v4h-25zM35,42h25v4h-25zM35,53h18v4h-18z"/>
-    <path android:fillColor="#F6C453" android:pathData="M75,49a22,22 0,1 0,0.1 0z"/>
+    <path android:fillColor="#F6C453" android:pathData="M97,71a22,22 0,1 1,-44 0a22,22 0,1 1,44 0"/>
     <path android:fillColor="#18365F" android:pathData="M83,39c-2,-3 -5,-5 -9,-5 -6,0 -10,3 -10,8 0,5 4,7 10,9 4,1 5,2 5,4 0,2 -2,4 -6,4 -4,0 -7,-2 -9,-4l-3,4c2,3 5,5 9,6v5h5v-5c6,-1 9,-5 9,-10 0,-5 -4,-8 -10,-10 -4,-1 -5,-2 -5,-3 0,-2 2,-3 5,-3 3,0 5,1 7,3z"/>
 </vector>
 """, encoding="utf-8")
