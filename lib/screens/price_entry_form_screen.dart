@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../data/app_database.dart';
 import '../models/price_entry.dart';
-import '../utils/app_helpers.dart';
+import '../models/product.dart';
 import '../state/app_settings.dart';
+import '../ui/ui.dart';
+import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
+import '../utils/currencies.dart';
+import '../utils/error_messages.dart';
 
+/// Records a new purchase or sale price, or edits an existing record.
 class PriceEntryFormScreen extends StatefulWidget {
-  const PriceEntryFormScreen({super.key, required this.productId, required this.productName, required this.isPurchase, this.entry});
+  const PriceEntryFormScreen({super.key, required this.product, required this.isPurchase, this.entry});
 
-  final int productId;
-  final String productName;
+  final Product product;
   final bool isPurchase;
+
+  /// When set, this record is edited instead of a new one being added.
   final PriceEntry? entry;
 
   @override
@@ -21,208 +26,252 @@ class PriceEntryFormScreen extends StatefulWidget {
 
 class _PriceEntryFormScreenState extends State<PriceEntryFormScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _price = TextEditingController();
-  final _quantity = TextEditingController(text: '1');
-  final _party = TextEditingController();
-  final _invoice = TextEditingController();
-  final _notes = TextEditingController();
-  DateTime _date = DateTime.now();
+  late final TextEditingController _price;
+  late final TextEditingController _quantity;
+  late final TextEditingController _party;
+  late final TextEditingController _invoice;
+  late final TextEditingController _notes;
+  late DateTime _date;
+  late String _currency;
   bool _saving = false;
-  String _currency = AppSettings.instance.currency;
+  bool _dirty = false;
+
+  bool get _editing => widget.entry != null;
 
   @override
   void initState() {
     super.initState();
     final entry = widget.entry;
-    if (entry != null) {
-      _price.text = entry.unitPrice.toString();
-      _quantity.text = entry.quantity.toString();
-      _party.text = entry.partyName ?? '';
-      _invoice.text = entry.invoiceNumber ?? '';
-      _notes.text = entry.notes ?? '';
-      _date = DateTime.parse(entry.date);
-      _currency = entry.currencyCode;
-    }
+    // Edited values are shown without grouping or exponent so they can be
+    // edited and parsed back exactly.
+    _price = TextEditingController(text: entry == null ? '' : editableNumber(entry.unitPrice));
+    _quantity = TextEditingController(text: entry == null ? '1' : editableNumber(entry.quantity));
+    _party = TextEditingController(text: entry?.partyName ?? '');
+    _invoice = TextEditingController(text: entry?.invoiceNumber ?? '');
+    _notes = TextEditingController(text: entry?.notes ?? '');
+    _date = entry == null ? DateTime.now() : DateTime.parse(entry.date);
+    // A new record starts in the currency of the product's last record of the
+    // same kind, so a rial price is not saved as dollars by mistake.
+    final last = widget.isPurchase ? widget.product.latestPurchaseCurrency : widget.product.latestSaleCurrency;
+    _currency = entry?.currencyCode ?? last ?? AppSettings.instance.currency;
   }
 
   @override
   void dispose() {
-    _price.dispose();
-    _quantity.dispose();
-    _party.dispose();
-    _invoice.dispose();
-    _notes.dispose();
+    for (final c in [_price, _quantity, _party, _invoice, _notes]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      locale: Localizations.localeOf(context),
-      initialDate: _date,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      helpText: 'اختر تاريخ العملية',
-      cancelText: 'إلغاء',
-      confirmText: 'اختيار',
-    );
-    if (picked != null && mounted) setState(() => _date = picked);
+  void _changed([Object? _]) {
+    if (!_dirty) setState(() => _dirty = true);
   }
 
-  String? _validateNumber(String? value, {required bool quantity}) {
-    final parsed = parseLocalizedNumber(value ?? '');
-    if (parsed == null) return appTextValue('أدخل رقمًا صحيحًا.', 'Enter a valid number.');
-    if (quantity ? parsed <= 0 : parsed < 0) {
-      return quantity ? appTextValue('الكمية يجب أن تكون أكبر من صفر.', 'Quantity must be greater than zero.') : appTextValue('السعر يجب ألا يكون سالبًا.', 'Price cannot be negative.');
+  Future<void> _pickDate() async {
+    // Imported records may be older or later than the usual range; keep them pickable.
+    final first = DateTime(2000);
+    final last = DateTime.now().add(const Duration(days: 366));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: _date.isBefore(first) ? _date : first,
+      lastDate: _date.isAfter(last) ? _date : last,
+      helpText: appTextValue('تاريخ العملية', 'Transaction date'),
+    );
+    if (picked != null && mounted) {
+      setState(() => _date = picked);
+      _changed();
     }
-    return null;
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
+    final db = AppDatabase.instance;
     final price = parseLocalizedNumber(_price.text)!;
     final quantity = parseLocalizedNumber(_quantity.text)!;
+    final date = toIsoDate(_date);
+    final productId = widget.product.id;
     try {
-      final date = toIsoDate(_date);
       final entry = widget.entry;
-      if (entry != null) {
-        if (widget.isPurchase) {
-          await AppDatabase.instance.updatePurchaseEntry(
-            id: entry.id,
-            productId: widget.productId,
-            date: date,
-            unitPrice: price,
-            quantity: quantity,
-            supplier: _party.text,
-            invoiceNumber: _invoice.text,
-            notes: _notes.text,
-            currencyCode: _currency,
-          );
+      if (widget.isPurchase) {
+        if (entry == null) {
+          await db.recordPurchase(productId: productId, date: date, unitPrice: price, quantity: quantity,
+              supplier: _party.text, invoiceNumber: _invoice.text, notes: _notes.text, currencyCode: _currency);
         } else {
-          await AppDatabase.instance.updateSaleEntry(
-            id: entry.id,
-            productId: widget.productId,
-            date: date,
-            unitPrice: price,
-            quantity: quantity,
-            customer: _party.text,
-            notes: _notes.text,
-            currencyCode: _currency,
-          );
+          await db.updatePurchaseEntry(id: entry.id, productId: productId, date: date, unitPrice: price, quantity: quantity,
+              supplier: _party.text, invoiceNumber: _invoice.text, notes: _notes.text, currencyCode: _currency);
         }
-      } else if (widget.isPurchase) {
-        await AppDatabase.instance.recordPurchase(
-          productId: widget.productId,
-          date: date,
-          unitPrice: price,
-          quantity: quantity,
-          supplier: _party.text,
-          invoiceNumber: _invoice.text,
-          notes: _notes.text,
-          currencyCode: _currency,
-        );
       } else {
-        await AppDatabase.instance.recordSale(
-          productId: widget.productId,
-          date: date,
-          unitPrice: price,
-          quantity: quantity,
-          customer: _party.text,
-          notes: _notes.text,
-          currencyCode: _currency,
-        );
+        if (entry == null) {
+          await db.recordSale(productId: productId, date: date, unitPrice: price, quantity: quantity,
+              customer: _party.text, notes: _notes.text, currencyCode: _currency);
+        } else {
+          await db.updateSaleEntry(id: entry.id, productId: productId, date: date, unitPrice: price, quantity: quantity,
+              customer: _party.text, notes: _notes.text, currencyCode: _currency);
+        }
       }
-      if (mounted) Navigator.of(context).pop(true);
+      if (!mounted) return;
+      _dirty = false;
+      Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(appTextValue(widget.entry == null ? 'تعذر تسجيل العملية: ' : 'تعذر تعديل العملية: ', widget.entry == null ? 'Could not save transaction: ' : 'Could not update transaction: ') + error.toString())));
-        setState(() => _saving = false);
-      }
+      if (!mounted) return;
+      setState(() => _saving = false);
+      showMessage(context, friendlyError(error));
     }
+  }
+
+  Widget _reference(BuildContext context) {
+    final p = widget.product;
+    final price = widget.isPurchase ? p.latestPurchasePrice : p.latestSalePrice;
+    if (_editing) return const SizedBox.shrink();
+    return PriceTile(
+      kind: widget.isPurchase ? PriceKind.purchase : PriceKind.sale,
+      price: price,
+      currency: widget.isPurchase ? p.latestPurchaseCurrency : p.latestSaleCurrency,
+      date: widget.isPurchase ? p.latestPurchaseDate : p.latestSaleDate,
+      party: widget.isPurchase ? p.latestPurchaseSupplier : p.latestSaleCustomer,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isPurchase = widget.isPurchase;
-    final title = widget.entry == null
-        ? appTextValue(isPurchase ? 'تسجيل عملية شراء' : 'تسجيل عملية بيع', isPurchase ? 'Record purchase' : 'Record sale')
-        : appTextValue(isPurchase ? 'تعديل عملية شراء' : 'تعديل عملية بيع', isPurchase ? 'Edit purchase transaction' : 'Edit sale transaction');
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: ListTile(
-                leading: CircleAvatar(child: Icon(isPurchase ? Icons.shopping_cart_outlined : Icons.sell_outlined)),
-                title: Text(widget.productName, style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(appTextValue(
-                  widget.entry == null
-                      ? (isPurchase ? 'سيُحفظ السعر في سجل المشتريات' : 'سيُحفظ السعر في سجل المبيعات')
-                      : 'سيتم تحديث هذه العملية في سجل ${isPurchase ? 'المشتريات' : 'المبيعات'}',
-                  widget.entry == null
-                      ? (isPurchase ? 'This price will be saved in purchase history' : 'This price will be saved in sales history')
-                      : 'This transaction will be updated in ${isPurchase ? 'purchase' : 'sales'} history',
-                )),
-              ),
-            ),
-            const SizedBox(height: 14),
-            InkWell(
-              onTap: _pickDate,
-              borderRadius: BorderRadius.circular(14),
-              child: InputDecorator(
-                decoration: InputDecoration(labelText: appTextValue('تاريخ العملية *', 'Transaction date *'), prefixIcon: Icon(Icons.calendar_month_outlined)),
-                child: Row(children: [Expanded(child: Text(formatDate(toIsoDate(_date), Localizations.localeOf(context).languageCode))), const Icon(Icons.edit_calendar_outlined)]),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9٠-٩۰-۹.,٫٬\-]'))],
-              decoration: InputDecoration(labelText: appTextValue(isPurchase ? 'سعر شراء الوحدة *' : 'سعر بيع الوحدة *', isPurchase ? 'Purchase price per unit *' : 'Sale price per unit *'), suffixText: currencyLabel(context, _currency), helperText: appTextValue('اكتب السعر للوحدة الواحدة، ويمكن إدخال الأرقام العربية أو الإنجليزية.', 'Enter price per unit. Arabic and English digits are supported.')),
-              validator: (value) => _validateNumber(value, quantity: false),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _currency,
-              decoration: InputDecoration(labelText: appTextValue('عملة العملية', 'Transaction currency')),
-              items: const [
-                DropdownMenuItem(value: 'USD', child: Text('USD — US Dollar')),
-                DropdownMenuItem(value: 'SAR', child: Text('SAR — Saudi Riyal')),
-                DropdownMenuItem(value: 'YER', child: Text('YER — Yemeni Rial')),
+    final purchase = widget.isPurchase;
+    final title = _editing
+        ? appTextValue(purchase ? 'تعديل عملية شراء' : 'تعديل عملية بيع', purchase ? 'Edit purchase' : 'Edit sale')
+        : appTextValue(purchase ? 'تسجيل شراء' : 'تسجيل بيع', purchase ? 'Record purchase' : 'Record sale');
+    final language = Localizations.localeOf(context).languageCode;
+    return PopScope(
+      canPop: !_dirty || _saving,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await confirmDiscardChanges(context) && context.mounted) {
+          _dirty = false;
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: PageBody(
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(Space.lg),
+              children: [
+                Text(widget.product.name, style: context.text.titleMedium),
+                const SizedBox(height: Space.xs),
+                Text(
+                  appTextValue('الوحدة: ${localizeCatalogValue(context, widget.product.unit)}',
+                      'Unit: ${localizeCatalogValue(context, widget.product.unit)}'),
+                  style: context.text.bodySmall,
+                ),
+                const SizedBox(height: Space.md),
+                _reference(context),
+                const SizedBox(height: Space.lg),
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: Radii.tile,
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: appTextValue('تاريخ العملية', 'Transaction date'),
+                      prefixIcon: const Icon(Icons.calendar_month_outlined),
+                    ),
+                    child: Text(ltrIsolate(formatDate(toIsoDate(_date), language))),
+                  ),
+                ),
+                const SizedBox(height: Space.md),
+                AmountField(
+                  controller: _price,
+                  label: appTextValue(purchase ? 'سعر شراء الوحدة' : 'سعر بيع الوحدة', purchase ? 'Purchase price per unit' : 'Sale price per unit'),
+                  suffixText: currencyLabel(context, _currency),
+                  helperText: appTextValue('سعر الوحدة الواحدة. تُقبل الأرقام العربية والإنجليزية.', 'Price of one unit. Arabic and Latin digits are accepted.'),
+                  onChanged: _changed,
+                ),
+                const SizedBox(height: Space.md),
+                Text(appTextValue('العملة', 'Currency'), style: context.text.labelLarge),
+                const SizedBox(height: Space.xs),
+                SegmentedButton<String>(
+                  segments: [
+                    for (final code in AppCurrencies.supported)
+                      ButtonSegment<String>(
+                        value: code,
+                        label: Text(language == 'ar' ? AppCurrencies.arabicSymbol(code) : code),
+                        tooltip: language == 'ar' ? AppCurrencies.arabicName(code) : AppCurrencies.englishName(code),
+                      ),
+                  ],
+                  selected: {_currency},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (value) {
+                    setState(() => _currency = value.single);
+                    _changed();
+                  },
+                ),
+                const SizedBox(height: Space.md),
+                AmountField(
+                  controller: _quantity,
+                  label: appTextValue('الكمية', 'Quantity'),
+                  suffixText: localizeCatalogValue(context, widget.product.unit),
+                  mustBePositive: true,
+                  onChanged: _changed,
+                ),
+                const SizedBox(height: Space.md),
+                TextFormField(
+                  controller: _party,
+                  textInputAction: TextInputAction.next,
+                  onChanged: _changed,
+                  decoration: InputDecoration(
+                    labelText: appTextValue(purchase ? 'المورد' : 'العميل', purchase ? 'Supplier' : 'Customer'),
+                    hintText: appTextValue('اختياري', 'Optional'),
+                    prefixIcon: Icon(purchase ? Icons.storefront_outlined : Icons.person_outline),
+                  ),
+                ),
+                if (purchase) ...[
+                  const SizedBox(height: Space.md),
+                  TextFormField(
+                    controller: _invoice,
+                    textInputAction: TextInputAction.next,
+                    onChanged: _changed,
+                    decoration: InputDecoration(
+                      labelText: appTextValue('رقم الفاتورة', 'Invoice number'),
+                      hintText: appTextValue('اختياري', 'Optional'),
+                      prefixIcon: const Icon(Icons.receipt_outlined),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: Space.md),
+                TextFormField(
+                  controller: _notes,
+                  minLines: 2,
+                  maxLines: 4,
+                  onChanged: _changed,
+                  decoration: InputDecoration(
+                    labelText: appTextValue('ملاحظات', 'Notes'),
+                    hintText: appTextValue('اختياري', 'Optional'),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: Space.xxl),
               ],
-              onChanged: (value) { if (value != null) setState(() => _currency = value); },
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _quantity,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9٠-٩۰-۹.,٫٬]'))],
-              decoration: InputDecoration(labelText: appTextValue('الكمية *', 'Quantity *')),
-              validator: (value) => _validateNumber(value, quantity: true),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(controller: _party, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: appTextValue(isPurchase ? 'اسم المورد' : 'اسم العميل', isPurchase ? 'Supplier name' : 'Customer name'))),
-            if (isPurchase) ...[
-              const SizedBox(height: 12),
-              TextFormField(controller: _invoice, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: appTextValue('رقم الفاتورة', 'Invoice number'))),
-            ],
-            const SizedBox(height: 12),
-            TextFormField(controller: _notes, minLines: 2, maxLines: 4, decoration: InputDecoration(labelText: appTextValue('ملاحظات العملية', 'Transaction notes'), alignLabelWithHint: true)),
-            const SizedBox(height: 24),
-            FilledButton.icon(
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.md),
+            child: FilledButton.icon(
               onPressed: _saving ? null : _save,
-              icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-              label: AppText(
-                ar: _saving ? 'جارٍ الحفظ...' : (widget.entry == null ? 'حفظ العملية' : 'حفظ التعديلات'),
-                en: _saving ? 'Saving...' : (widget.entry == null ? 'Save transaction' : 'Save changes'),
-              ),
+              icon: _saving
+                  ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.check),
+              label: Text(_saving
+                  ? appTextValue('جارٍ الحفظ…', 'Saving…')
+                  : _editing
+                      ? appTextValue('حفظ التعديلات', 'Save changes')
+                      : appTextValue('حفظ العملية', 'Save')),
             ),
-          ],
+          ),
         ),
       ),
     );

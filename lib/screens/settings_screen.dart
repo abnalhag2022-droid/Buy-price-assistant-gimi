@@ -1,293 +1,196 @@
 import 'package:flutter/material.dart';
 
 import '../state/app_settings.dart';
+import '../ui/ui.dart';
+import '../utils/app_helpers.dart';
 import '../utils/app_info.dart';
 import '../utils/app_text.dart';
+import '../utils/currencies.dart';
+import '../utils/error_messages.dart';
+import 'backup_restore_screen.dart';
 import 'data_exchange_screen.dart';
 import 'support_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  Future<void> _apply(BuildContext context, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      if (context.mounted) showMessage(context, friendlyError(error));
+    }
+  }
+
   Future<void> _addValue(BuildContext context, {required bool category}) async {
     final controller = TextEditingController();
     final value = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: AppText(
-          ar: category ? 'إضافة تصنيف' : 'إضافة وحدة',
-          en: category ? 'Add category' : 'Add unit',
-        ),
+      builder: (dialog) => AlertDialog(
+        title: Text(category ? appTextValue('إضافة تصنيف', 'Add category') : appTextValue('إضافة وحدة', 'Add unit')),
         content: TextField(
           controller: controller,
           autofocus: true,
+          textInputAction: TextInputAction.done,
           decoration: InputDecoration(labelText: appTextValue('الاسم', 'Name')),
-          onSubmitted: (text) => Navigator.of(dialogContext).pop(text.trim()),
+          onSubmitted: (text) => Navigator.of(dialog).pop(text.trim()),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const AppText(ar: 'إلغاء', en: 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const AppText(ar: 'إضافة', en: 'Add'),
-          ),
+          TextButton(onPressed: () => Navigator.of(dialog).pop(), child: Text(appTextValue('إلغاء', 'Cancel'))),
+          FilledButton(onPressed: () => Navigator.of(dialog).pop(controller.text.trim()), child: Text(appTextValue('إضافة', 'Add'))),
         ],
       ),
     );
     controller.dispose();
-    if (value == null || value.trim().isEmpty || !context.mounted) return;
-    try {
-      if (category) {
-        await AppSettings.instance.addCategory(value);
-      } else {
-        await AppSettings.instance.addUnit(value);
-      }
-    } on StateError {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(appTextValue(
-          'لم تتم الإضافة: القيمة مسجلة مسبقًا أو وصلت القائمة إلى الحد الأقصى.',
-          'Not added: the value already exists or the list reached its limit.',
-        )),
-      ));
-    } on ArgumentError {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(appTextValue('أدخل قيمة صحيحة.', 'Enter a valid value.')),
-      ));
-    }
+    if (value == null || value.isEmpty || !context.mounted) return;
+    final settings = AppSettings.instance;
+    await _apply(context, () => category ? settings.addCategory(value) : settings.addUnit(value));
+  }
+
+  Future<void> _removeValue(BuildContext context, String value, {required bool category}) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: category ? appTextValue('إزالة التصنيف؟', 'Remove category?') : appTextValue('إزالة الوحدة؟', 'Remove unit?'),
+      message: appTextValue(
+        'ستُزال «${localizeCatalogValue(context, value)}» من القائمة فقط. الأصناف المسجلة بها لا تتغير.',
+        '"${localizeCatalogValue(context, value)}" is removed from this list only. Items that use it are not changed.',
+      ),
+      confirmLabel: appTextValue('إزالة', 'Remove'),
+    );
+    if (!confirmed || !context.mounted) return;
+    final settings = AppSettings.instance;
+    await _apply(context, () => category ? settings.removeCategory(value) : settings.removeUnit(value));
   }
 
   @override
   Widget build(BuildContext context) {
     final settings = AppSettings.instance;
-    return AnimatedBuilder(
-      animation: settings,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(title: const AppText(ar: 'الإعدادات', en: 'Settings')),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _SettingsSection(
-              titleAr: 'التفضيلات العامة',
-              titleEn: 'General preferences',
-              icon: Icons.tune,
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) {
+        final language = Localizations.localeOf(context).languageCode;
+        Widget values({required List<String> items, required bool category}) => Wrap(
+              spacing: Space.sm,
+              runSpacing: Space.sm,
               children: [
-                DropdownButtonFormField<String>(
-                  initialValue: settings.language,
-                  decoration: InputDecoration(
-                    labelText: appTextValue('لغة البرنامج', 'Application language'),
+                for (final value in items)
+                  InputChip(
+                    label: Text(localizeCatalogValue(context, value)),
+                    onDeleted: () => _removeValue(context, value, category: category),
+                    deleteButtonTooltipMessage: appTextValue('إزالة', 'Remove'),
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'ar', child: Text('العربية')),
-                    DropdownMenuItem(value: 'en', child: Text('English')),
-                  ],
-                  onChanged: (value) async {
-                    if (value == null) return;
-                    try {
-                      await settings.setLanguage(value);
-                    } catch (error) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error.toString())),
-                        );
-                      }
-                    }
-                  },
+                ActionChip(
+                  avatar: const Icon(Icons.add, size: Sizes.iconSm),
+                  label: Text(appTextValue('إضافة', 'Add')),
+                  onPressed: () => _addValue(context, category: category),
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: settings.theme,
-                  decoration: InputDecoration(
-                    labelText: appTextValue('المظهر', 'Appearance'),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'light', child: AppText(ar: 'فاتح', en: 'Light')),
-                    DropdownMenuItem(value: 'dark', child: AppText(ar: 'ليلي أسود', en: 'Black / dark')),
-                    DropdownMenuItem(value: 'system', child: AppText(ar: 'حسب الجهاز', en: 'System default')),
-                  ],
-                  onChanged: (value) async {
-                    if (value == null) return;
-                    try {
-                      await settings.setTheme(value);
-                    } catch (error) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error.toString())),
-                        );
-                      }
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: settings.currency,
-                  decoration: InputDecoration(
-                    labelText: appTextValue(
-                      'العملة الافتراضية للعمليات الجديدة',
-                      'Default currency for new entries',
+              ],
+            );
+        return Scaffold(
+          appBar: AppBar(title: Text(appTextValue('الإعدادات', 'Settings'))),
+          body: PageBody(
+            child: ListView(
+              padding: const EdgeInsets.all(Space.lg),
+              children: [
+                SectionCard(
+                  title: appTextValue('اللغة والمظهر', 'Language and appearance'),
+                  icon: Icons.tune,
+                  children: [
+                    Text(appTextValue('اللغة', 'Language'), style: context.text.labelLarge),
+                    const SizedBox(height: Space.xs),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'ar', label: Text('العربية')),
+                        ButtonSegment(value: 'en', label: Text('English')),
+                      ],
+                      selected: {settings.language},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (v) => _apply(context, () => settings.setLanguage(v.single)),
                     ),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'USD', child: Text('USD — US Dollar')),
-                    DropdownMenuItem(value: 'SAR', child: Text('SAR — Saudi Riyal')),
-                    DropdownMenuItem(value: 'YER', child: Text('YER — Yemeni Rial')),
+                    const SizedBox(height: Space.lg),
+                    Text(appTextValue('المظهر', 'Appearance'), style: context.text.labelLarge),
+                    const SizedBox(height: Space.xs),
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(value: 'light', icon: const Icon(Icons.light_mode_outlined), label: Text(appTextValue('فاتح', 'Light'))),
+                        ButtonSegment(value: 'dark', icon: const Icon(Icons.dark_mode_outlined), label: Text(appTextValue('داكن', 'Dark'))),
+                        ButtonSegment(value: 'system', icon: const Icon(Icons.brightness_auto_outlined), label: Text(appTextValue('الجهاز', 'System'))),
+                      ],
+                      selected: {settings.theme},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (v) => _apply(context, () => settings.setTheme(v.single)),
+                    ),
                   ],
-                  onChanged: (value) async {
-                    if (value == null) return;
-                    try {
-                      await settings.setCurrency(value);
-                    } catch (error) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error.toString())),
-                        );
-                      }
-                    }
-                  },
                 ),
-                const SizedBox(height: 8),
-                const AppText(
-                  ar: 'تغيير العملة الافتراضية لا يحوّل الأسعار القديمة. لكل عملية عملتها المسجلة بصورة مستقلة.',
-                  en: 'Changing the default currency does not convert historical prices. Each transaction retains its recorded currency.',
+                const SizedBox(height: Space.md),
+                SectionCard(
+                  title: appTextValue('العملة الافتراضية', 'Default currency'),
+                  subtitle: appTextValue(
+                    'تُقترح للعمليات الجديدة فقط. لا تُحوَّل الأسعار المسجلة؛ لكل عملية عملتها.',
+                    'Suggested for new records only. Recorded prices are never converted; each keeps its own currency.',
+                  ),
+                  icon: Icons.payments_outlined,
+                  children: [
+                    ChoiceList<String>(
+                      options: [
+                        for (final code in AppCurrencies.supported)
+                          ChoiceOption(
+                            value: code,
+                            label: language == 'ar'
+                                ? '${AppCurrencies.arabicName(code)} (${ltrIsolate(code)})'
+                                : '${AppCurrencies.englishName(code)} ($code)',
+                          ),
+                      ],
+                      selected: settings.currency,
+                      onChanged: (code) => _apply(context, () => settings.setCurrency(code)),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SettingsSection(
-              titleAr: 'تصنيفات الأصناف',
-              titleEn: 'Product categories',
-              icon: Icons.category_outlined,
-              trailing: IconButton(
-                tooltip: appTextValue('إضافة تصنيف', 'Add category'),
-                onPressed: () => _addValue(context, category: true),
-                icon: const Icon(Icons.add_circle_outline),
-              ),
-              children: [
-                const AppText(
-                  ar: 'توحّد هذه القائمة كتابة التصنيفات عند إضافة الأصناف. إزالة تصنيف من القائمة لا تغيّر بيانات الأصناف السابقة.',
-                  en: 'This list keeps category names consistent. Removing one here does not modify previously saved products.',
+                const SizedBox(height: Space.md),
+                SectionCard(
+                  title: appTextValue('التصنيفات', 'Categories'),
+                  subtitle: appTextValue('قائمة تُختار منها التصنيفات عند إضافة صنف.', 'The list you pick categories from when adding an item.'),
+                  icon: Icons.category_outlined,
+                  children: [values(items: settings.categories, category: true)],
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: settings.categories
-                      .map((value) => InputChip(
-                            label: Text(localizeCatalogValue(context, value)),
-                            onDeleted: () => settings.removeCategory(value),
-                          ))
-                      .toList(),
+                const SizedBox(height: Space.md),
+                SectionCard(
+                  title: appTextValue('وحدات القياس', 'Units'),
+                  subtitle: appTextValue('وحدات موحّدة تقلل اختلاف الكتابة بين الأصناف.', 'Consistent units reduce spelling differences between items.'),
+                  icon: Icons.straighten,
+                  children: [values(items: settings.units, category: false)],
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SettingsSection(
-              titleAr: 'وحدات القياس',
-              titleEn: 'Units of measure',
-              icon: Icons.straighten,
-              trailing: IconButton(
-                tooltip: appTextValue('إضافة وحدة', 'Add unit'),
-                onPressed: () => _addValue(context, category: false),
-                icon: const Icon(Icons.add_circle_outline),
-              ),
-              children: [
-                const AppText(
-                  ar: 'استخدم قائمة موحّدة للوحدات لتقليل اختلاف كتابتها بين الأصناف.',
-                  en: 'Use a consistent unit list to reduce naming variations across products.',
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: settings.units
-                      .map((value) => InputChip(
-                            label: Text(localizeCatalogValue(context, value)),
-                            onDeleted: () => settings.removeUnit(value),
-                          ))
-                      .toList(),
+                const SizedBox(height: Space.md),
+                Card(
+                  child: Column(children: [
+                    ListTile(
+                      leading: const Icon(Icons.import_export_rounded),
+                      title: Text(appTextValue('استيراد وتصدير Excel وCSV', 'Excel and CSV import/export')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const DataExchangeScreen())),
+                    ),
+                    const Divider(indent: Space.lg, endIndent: Space.lg),
+                    ListTile(
+                      leading: const Icon(Icons.backup_outlined),
+                      title: Text(appTextValue('النسخ الاحتياطي والاستعادة', 'Backup and restore')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const BackupRestoreScreen())),
+                    ),
+                    const Divider(indent: Space.lg, endIndent: Space.lg),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: Text(appTextValue('الدعم وحول التطبيق', 'Support and about')),
+                      subtitle: Text(ltrIsolate('${AppInfo.nameEn} ${AppInfo.versionLabel}')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const SupportScreen())),
+                    ),
+                  ]),
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.table_view_outlined),
-                title: const AppText(ar: 'استيراد وتصدير Excel وCSV', en: 'Excel and CSV import/export'),
-                subtitle: const AppText(ar: 'معاينة قبل الاستيراد وتصدير سجل الأسعار كاملًا.', en: 'Preview imports and export complete price history.'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(builder: (_) => const DataExchangeScreen()),
-                ),
-              ),
-            ),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.support_agent_outlined),
-                title: const AppText(ar: 'الدعم والتواصل', en: 'Support and contact'),
-                subtitle: const AppText(ar: 'التواصل عبر واتساب أو البريد الإلكتروني.', en: 'Contact us through WhatsApp or email.'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(builder: (_) => const SupportScreen()),
-                ),
-              ),
-            ),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const AppText(ar: 'حول التطبيق', en: 'About the app'),
-                subtitle: Text('${AppInfo.nameEn} · ${AppInfo.versionLabel}'),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
-}
-
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
-    required this.titleAr,
-    required this.titleEn,
-    required this.icon,
-    required this.children,
-    this.trailing,
-  });
-
-  final String titleAr;
-  final String titleEn;
-  final IconData icon;
-  final List<Widget> children;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: AppText(
-                      ar: titleAr,
-                      en: titleEn,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  if (trailing != null) trailing!,
-                ],
-              ),
-              const SizedBox(height: 12),
-              ...children,
-            ],
-          ),
-        ),
-      );
 }

@@ -5,6 +5,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'screens/home_screen.dart';
 import 'state/app_settings.dart';
+import 'ui/app_theme.dart';
 import 'utils/app_info.dart';
 import 'utils/error_log.dart';
 
@@ -31,95 +32,16 @@ class BuyPriceAssistantApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = AppSettings.instance;
-    const seed = Color(0xFF315A93);
-
-    final lightTheme = ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: seed),
-      scaffoldBackgroundColor: const Color(0xFFF7F8FA),
-      appBarTheme: const AppBarTheme(
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: Color(0xFFF7F8FA),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFE1E5EA)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: seed, width: 1.5),
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: const BorderSide(color: Color(0xFFE8EBEF)),
-        ),
-      ),
-    );
-
-    final darkTheme = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seed,
-        brightness: Brightness.dark,
-      ).copyWith(
-        surface: Colors.black,
-        surfaceContainerHighest: const Color(0xFF1C1C1C),
-      ),
-      scaffoldBackgroundColor: Colors.black,
-      appBarTheme: const AppBarTheme(
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: Colors.black,
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFF171717),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF353535)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF789BD1), width: 1.5),
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: const Color(0xFF111111),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: const BorderSide(color: Color(0xFF292929)),
-        ),
-      ),
-    );
-
-    return AnimatedBuilder(
-      animation: settings,
+    return ListenableBuilder(
+      listenable: settings,
       builder: (context, _) => MaterialApp(
         onGenerateTitle: (_) => settings.isArabic ? AppInfo.nameAr : AppInfo.nameEn,
         debugShowCheckedModeBanner: false,
         locale: settings.locale,
         supportedLocales: const [Locale('ar'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        theme: lightTheme,
-        darkTheme: darkTheme,
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
         themeMode: settings.themeMode,
         home: const HomeScreen(),
       ),

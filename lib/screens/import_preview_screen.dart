@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/backup_service.dart';
 import '../data/spreadsheet_exchange.dart';
+import '../ui/ui.dart';
 import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
 import '../utils/error_messages.dart';
@@ -72,23 +73,18 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
     final plan = _plan;
     if (plan == null || _importing) return;
     final entries = plan.entriesToWrite(includeDuplicates: _includeDuplicates);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: AppText(ar: 'تأكيد الاستيراد', en: 'Confirm import'),
-        content: Text(appTextValue(
-          'سيُضاف ${plan.productsToCreate} صنف جديد و$entries عملية، ويُلغى أرشفة ${plan.productsToUnarchive.length} صنف. '
-              'لن تُعدَّل بيانات الأصناف الموجودة ولن يُحذف أي سجل. ستُحفظ نسخة أمان قبل الكتابة، ويمكن التراجع عن هذا الاستيراد لاحقًا.',
-          '${plan.productsToCreate} new products and $entries entries will be added, and ${plan.productsToUnarchive.length} products un-archived. '
-              'Existing product details and records are not changed. A safety backup is saved first and this import can be undone later.',
-        )),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: AppText(ar: 'إلغاء', en: 'Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: AppText(ar: 'استيراد', en: 'Import')),
-        ],
+    final confirmed = await showConfirmDialog(
+      context,
+      title: appTextValue('تأكيد الاستيراد', 'Confirm import'),
+      message: appTextValue(
+        'أصناف جديدة: ${plan.productsToCreate}\nعمليات ستُضاف: $entries\nأصناف تُلغى أرشفتها: ${plan.productsToUnarchive.length}\n\n'
+            'لن تُعدَّل بيانات الأصناف الموجودة ولن يُحذف أي سجل. ستُحفظ نسخة أمان قبل الكتابة، ويمكن التراجع عن هذا الاستيراد لاحقًا.',
+        'New items: ${plan.productsToCreate}\nRecords to add: $entries\nItems to un-archive: ${plan.productsToUnarchive.length}\n\n'
+            'Existing item details and records are not changed. A safety copy is saved first and this import can be undone later.',
       ),
+      confirmLabel: appTextValue('استيراد', 'Import'),
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     setState(() => _importing = true);
     try {
       // A safety copy first: the import can also be undone, but this protects
@@ -105,7 +101,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _importing = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(error))));
+      showMessage(context, friendlyError(error));
     }
   }
 
@@ -122,15 +118,16 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
       appBar: AppBar(
         title: AppText(ar: 'معاينة الاستيراد', en: 'Import preview'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      body: PageBody(child: ListView(
+        padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xl),
         children: [
           Text(ltrIsolate(_preview.fileName), maxLines: 2, overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),
           _SummaryCard(preview: _preview, plan: plan, includeDuplicates: _includeDuplicates),
-          if (_planError != null) _Notice(text: friendlyError(_planError!), isError: true),
-          for (final issue in _preview.parsed.fileIssues) _Notice(text: issue.message, isError: issue.isError),
+          if (_planError != null) NoticeBanner(text: friendlyError(_planError!), kind: NoticeKind.error),
+          for (final issue in _preview.parsed.fileIssues)
+            NoticeBanner(text: appTextValue(issue.text.ar, issue.text.en), kind: issue.isError ? NoticeKind.error : NoticeKind.warning),
           if (decisionGroups.isNotEmpty) ...[
             _SectionTitle(
               ar: 'أصناف تحتاج إلى قرار (${decisionGroups.length})',
@@ -203,7 +200,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 20),
                 title: Text('${appTextValue('صف', 'Row')} ${r.line}${r.name.isEmpty ? '' : ': ${r.name}'}'),
-                subtitle: Text(r.errors.join('\n')),
+                subtitle: Text(r.errors.map((e) => appTextValue(e.ar, e.en)).join('\n')),
               ),
             if (rejected.length > _listLimit) _MoreLine(count: rejected.length - _listLimit),
             CheckboxListTile(
@@ -218,7 +215,7 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
           ],
           const SizedBox(height: 80),
         ],
-      ),
+      )),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -327,7 +324,7 @@ class _DecisionCard extends StatelessWidget {
             'In file: ${group.unit}${group.code == null ? '' : ' · code ${group.code}'} · ${group.purchaseCount} purchases · ${group.saleCount} sales',
           ), style: Theme.of(context).textTheme.bodySmall),
           for (final n in group.notices)
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text(n, style: Theme.of(context).textTheme.bodySmall)),
+            Padding(padding: const EdgeInsets.only(top: Space.xs), child: Text(appTextValue(n.ar, n.en), style: Theme.of(context).textTheme.bodySmall)),
           const Divider(),
           for (final c in group.candidates)
             option(
@@ -338,7 +335,7 @@ class _DecisionCard extends StatelessWidget {
               )),
               subtitle: Text([
                 _reasonText(c.reasons),
-                ...c.differences,
+                ...c.differences.map((d) => appTextValue(d.ar, d.en)),
               ].join('\n')),
             ),
           option(
@@ -385,7 +382,7 @@ class _GroupList extends StatelessWidget {
               ListTile(
                 dense: true,
                 title: Text(g.name),
-                subtitle: Text([describe(g), ...g.notices].join('\n')),
+                subtitle: Text([describe(g), ...g.notices.map((n) => appTextValue(n.ar, n.en))].join('\n')),
               ),
             if (groups.length > limit) _MoreLine(count: groups.length - limit),
           ],
@@ -401,30 +398,6 @@ class _SectionTitle extends StatelessWidget {
         padding: const EdgeInsets.only(top: 20, bottom: 6),
         child: AppText(ar: ar, en: en, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
       );
-}
-
-class _Notice extends StatelessWidget {
-  const _Notice({required this.text, required this.isError});
-  final String text;
-  final bool isError;
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isError ? colors.errorContainer : colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(isError ? Icons.error_outline : Icons.info_outline, size: 20,
-            color: isError ? colors.onErrorContainer : colors.onSurfaceVariant),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: TextStyle(color: isError ? colors.onErrorContainer : null))),
-      ]),
-    );
-  }
 }
 
 class _MoreLine extends StatelessWidget {

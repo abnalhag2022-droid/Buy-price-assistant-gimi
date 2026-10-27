@@ -11,10 +11,14 @@ class Product {
     this.isArchived = false,
     this.latestPurchasePrice,
     this.latestPurchaseDate,
-    this.latestPurchaseCurrency = 'YER',
+    this.latestPurchaseCurrency,
+    this.latestPurchaseQuantity,
+    this.latestPurchaseSupplier,
     this.latestSalePrice,
     this.latestSaleDate,
-    this.latestSaleCurrency = 'YER',
+    this.latestSaleCurrency,
+    this.latestSaleQuantity,
+    this.latestSaleCustomer,
     this.purchaseCount = 0,
     this.saleCount = 0,
   });
@@ -28,12 +32,19 @@ class Product {
   final String? notes;
   final bool isFavorite;
   final bool isArchived;
+
+  /// Values of the most recent purchase/sale record (by date, then entry);
+  /// all null when the product has no such record.
   final double? latestPurchasePrice;
   final String? latestPurchaseDate;
   final String? latestPurchaseCurrency;
+  final double? latestPurchaseQuantity;
+  final String? latestPurchaseSupplier;
   final double? latestSalePrice;
   final String? latestSaleDate;
   final String? latestSaleCurrency;
+  final double? latestSaleQuantity;
+  final String? latestSaleCustomer;
   final int purchaseCount;
   final int saleCount;
 
@@ -49,10 +60,14 @@ class Product {
         isArchived: ((map['is_archived'] as num?)?.toInt() ?? 0) == 1,
         latestPurchasePrice: (map['latest_purchase_price'] as num?)?.toDouble(),
         latestPurchaseDate: map['latest_purchase_date'] as String?,
-        latestPurchaseCurrency: map['latest_purchase_currency'] as String? ?? 'YER',
+        latestPurchaseCurrency: map['latest_purchase_currency'] as String?,
+        latestPurchaseQuantity: (map['latest_purchase_quantity'] as num?)?.toDouble(),
+        latestPurchaseSupplier: map['latest_purchase_supplier'] as String?,
         latestSalePrice: (map['latest_sale_price'] as num?)?.toDouble(),
         latestSaleDate: map['latest_sale_date'] as String?,
-        latestSaleCurrency: map['latest_sale_currency'] as String? ?? 'YER',
+        latestSaleCurrency: map['latest_sale_currency'] as String?,
+        latestSaleQuantity: (map['latest_sale_quantity'] as num?)?.toDouble(),
+        latestSaleCustomer: map['latest_sale_customer'] as String?,
         purchaseCount: ((map['purchase_count'] as num?)?.toInt() ?? 0),
         saleCount: ((map['sale_count'] as num?)?.toInt() ?? 0),
       );

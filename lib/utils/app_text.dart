@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../state/app_settings.dart';
+import 'app_helpers.dart';
+import 'currencies.dart';
 
 /// Use for short interface strings where introducing generated ARB files is not
 /// part of this version's scope. Longer-term localization can migrate to gen-l10n.
 String appTextValue(String arabic, String english) =>
     AppSettings.instance.isArabic ? arabic : english;
 
+/// Currency shown next to an amount: the Arabic symbol in Arabic, the ISO
+/// code in English.
 String currencyLabel(BuildContext context, String? code) {
-  final currency = code ?? 'YER';
+  final currency = code ?? AppCurrencies.legacyDefault;
   if (Localizations.localeOf(context).languageCode != 'ar') return currency;
-  return switch (currency) {
-    'SAR' => 'ر.س',
-    'USD' => 'دولار',
-    _ => 'ر.ي',
-  };
+  return AppCurrencies.arabicSymbol(currency);
 }
+
+/// "1,250.5 دولار" / "1,250.5 USD". The number is isolated left-to-right so
+/// it is never reordered inside Arabic text. Never invents a value: a missing
+/// price is the caller's responsibility to show as "not recorded".
+String formatAmount(BuildContext context, num price, String? currency) =>
+    '${ltrIsolate(formatMoney(price))} ${currencyLabel(context, currency)}';
 
 String localizeCatalogValue(BuildContext context, String value) {
   if (Localizations.localeOf(context).languageCode != 'en') return value;

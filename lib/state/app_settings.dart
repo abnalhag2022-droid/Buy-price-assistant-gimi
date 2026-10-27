@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/currencies.dart';
+import '../utils/localized_message.dart';
+
 /// Persistent local preferences for the offline-first app.
 /// Changes are stored before they are announced to the UI.
 class AppSettings extends ChangeNotifier {
@@ -46,9 +49,7 @@ class AppSettings extends ChangeNotifier {
     final currency = prefs.getString('gimi.currency');
     if (language == 'ar' || language == 'en') _language = language!;
     if (theme == 'light' || theme == 'dark' || theme == 'system') _theme = theme!;
-    if (currency == 'YER' || currency == 'SAR' || currency == 'USD') {
-      _currency = currency!;
-    }
+    if (currency != null && AppCurrencies.isSupported(currency)) _currency = currency;
     final categories = prefs.getStringList('gimi.categories');
     final units = prefs.getStringList('gimi.units');
     if (categories != null && categories.isNotEmpty) {
@@ -82,7 +83,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   Future<void> setCurrency(String value) async {
-    if (!const <String>{'YER', 'SAR', 'USD'}.contains(value)) {
+    if (!AppCurrencies.isSupported(value)) {
       throw ArgumentError.value(value, 'value', 'Unsupported currency.');
     }
     final prefs = await SharedPreferences.getInstance();
@@ -110,12 +111,14 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> _addCatalogValue(String value, {required bool isCategory}) async {
     final clean = value.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (clean.isEmpty) throw ArgumentError('القيمة لا يمكن أن تكون فارغة.');
+    if (clean.isEmpty) throw LocalizedArgumentError('القيمة لا يمكن أن تكون فارغة.', 'The value cannot be empty.');
     final target = isCategory ? _categories : _units;
     if (target.any((item) => item.toLowerCase() == clean.toLowerCase())) {
-      throw StateError('هذه القيمة مسجلة مسبقًا.');
+      throw LocalizedStateError('هذه القيمة مسجلة مسبقًا.', 'This value already exists.');
     }
-    if (target.length >= 100) throw StateError('وصلت القائمة إلى الحد الأقصى (100 عنصر).');
+    if (target.length >= 100) {
+      throw LocalizedStateError('وصلت القائمة إلى الحد الأقصى (100 عنصر).', 'The list reached its limit (100 entries).');
+    }
     target.add(clean);
     await _saveList(isCategory ? 'gimi.categories' : 'gimi.units', target);
     notifyListeners();
@@ -149,7 +152,7 @@ class AppSettings extends ChangeNotifier {
 
   static Map<String, Object?> validateBackupSettings(Object? source) {
     if (source is! Map) {
-      throw const FormatException('إعدادات النسخة الاحتياطية غير صالحة.');
+      throw const LocalizedFormatException('إعدادات النسخة الاحتياطية غير صالحة.', 'The backup settings are invalid.');
     }
     final map = Map<String, Object?>.from(source);
     final language = map['language'];
@@ -159,21 +162,21 @@ class AppSettings extends ChangeNotifier {
     final units = map['units'];
 
     if (language is! String || !const <String>{'ar', 'en'}.contains(language)) {
-      throw const FormatException('لغة النسخة الاحتياطية غير صالحة.');
+      throw const LocalizedFormatException('لغة النسخة الاحتياطية غير صالحة.', 'The backup language setting is invalid.');
     }
     if (theme is! String || !const <String>{'light', 'dark', 'system'}.contains(theme)) {
-      throw const FormatException('المظهر في النسخة الاحتياطية غير صالح.');
+      throw const LocalizedFormatException('المظهر في النسخة الاحتياطية غير صالح.', 'The backup appearance setting is invalid.');
     }
-    if (currency is! String || !const <String>{'YER', 'SAR', 'USD'}.contains(currency)) {
-      throw const FormatException('العملة الافتراضية في النسخة الاحتياطية غير صالحة.');
+    if (currency is! String || !AppCurrencies.isSupported(currency)) {
+      throw const LocalizedFormatException('العملة الافتراضية في النسخة الاحتياطية غير صالحة.', 'The backup default currency is invalid.');
     }
     if (categories is! List || units is! List ||
         categories.any((item) => item is! String) ||
         units.any((item) => item is! String)) {
-      throw const FormatException('قوائم التصنيفات أو الوحدات غير صالحة.');
+      throw const LocalizedFormatException('قوائم التصنيفات أو الوحدات غير صالحة.', 'The category or unit lists are invalid.');
     }
     if (categories.length > 100 || units.length > 100) {
-      throw const FormatException('قوائم الإعدادات أكبر من الحد المسموح.');
+      throw const LocalizedFormatException('قوائم الإعدادات أكبر من الحد المسموح.', 'The settings lists are larger than allowed.');
     }
     return <String, Object?>{
       'language': language,
@@ -218,7 +221,7 @@ class AppSettings extends ChangeNotifier {
         await prefs.setStringList('gimi.units', units),
       ];
       if (results.any((success) => !success)) {
-        throw StateError('تعذر حفظ بعض إعدادات النسخة الاحتياطية.');
+        throw LocalizedStateError('تعذر حفظ بعض إعدادات النسخة الاحتياطية.', 'Some backup settings could not be saved.');
       }
     } catch (error) {
       Object? rollbackError;
@@ -237,7 +240,10 @@ class AppSettings extends ChangeNotifier {
         }
       }
       if (rollbackError != null) {
-        throw StateError('فشل حفظ الإعدادات وفشل التراجع عن بعضها: $rollbackError');
+        throw LocalizedStateError(
+          'فشل حفظ الإعدادات وفشل التراجع عن بعضها: $rollbackError',
+          'Saving the settings failed and some could not be rolled back: $rollbackError',
+        );
       }
       rethrow;
     }

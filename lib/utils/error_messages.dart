@@ -4,43 +4,36 @@ import 'package:sqflite_common/sqlite_api.dart';
 
 import 'app_text.dart';
 import 'error_log.dart';
+import 'localized_message.dart';
 
 /// An error whose message is already written for the user, in both languages.
-class UserFacingException implements Exception {
+class UserFacingException implements Exception, LocalizedMessage {
   const UserFacingException(this.ar, this.en);
+  @override
   final String ar;
+  @override
   final String en;
 
   @override
   String toString() => ar;
 }
 
-/// Converts any error into a short message for the user. Raw exception class
-/// names and stack details are never shown; app errors keep their wording.
-/// Database, file and unknown errors are also added to the [ErrorLog] so the
-/// details can be copied from the support screen.
+/// Converts any error into a short message for the user. App errors carry
+/// their own Arabic and English wording ([LocalizedMessage]); raw exception
+/// text and stack details are never shown. Database, file and unexpected
+/// errors are added to the [ErrorLog] so the details can be copied from the
+/// support screen.
 String friendlyError(Object error) {
-  if (error is UserFacingException) return appTextValue(error.ar, error.en);
-  if (error is FormatException) return error.message;
-  if (error is StateError) return error.message;
-  if (error is ArgumentError) {
-    final message = error.message;
-    if (message is String && message.isNotEmpty) return message;
-  }
+  if (error is LocalizedMessage) return appTextValue(error.ar, error.en);
+  ErrorLog.instance.record(error, null);
   if (error is DatabaseException) {
-    ErrorLog.instance.record(error, null);
     if (error.isUniqueConstraintError() || error.toString().contains('CHECK constraint')) {
       return appTextValue('رُفضت البيانات لأنها لا تطابق قواعد الحفظ.', 'The data was rejected because it breaks a storage rule.');
     }
     return appTextValue('تعذر الوصول إلى قاعدة البيانات. لم تُحفظ التغييرات.', 'The database could not be accessed. Changes were not saved.');
   }
   if (error is FileSystemException) {
-    ErrorLog.instance.record(error, null);
     return appTextValue('تعذر قراءة الملف أو كتابته.', 'The file could not be read or written.');
   }
-  final text = error.toString();
-  // Messages written by this app (Arabic) are safe to show as they are.
-  if (RegExp('[؀-ۿ]').hasMatch(text) && !text.contains('Exception:')) return text;
-  ErrorLog.instance.record(error, null);
   return appTextValue('حدث خطأ غير متوقع. حاول مرة أخرى.', 'Something went wrong. Please try again.');
 }

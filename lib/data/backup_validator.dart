@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 
 import '../utils/app_helpers.dart';
 import '../utils/currencies.dart';
+import '../utils/localized_message.dart';
 
 /// Validated, normalized rows of a JSON backup, ready for insertion.
 class BackupContents {
@@ -43,19 +44,28 @@ class ImportUndoResult {
   final int productsRearchived;
 }
 
+/// Where a problem was found, in both languages ("record 3 in Purchases").
+class _At {
+  const _At(this.ar, this.en);
+  final String ar;
+  final String en;
+
+  Never fail(String ar, String en) => throw LocalizedFormatException('${this.ar}: $ar', '${this.en}: $en');
+}
+
 /// Validates backup files without touching the database. Every failure is a
-/// [FormatException] with an Arabic message that names the table and row.
+/// [LocalizedFormatException] that names the table and row.
 class BackupValidator {
   BackupValidator._();
 
   static const String formatName = 'buy_price_assistant_gimi_backup';
   static const Set<int> supportedVersions = <int>{1, 2, 3};
 
-  static const Map<String, String> _tableNames = <String, String>{
-    'products': 'الأصناف',
-    'purchase_entries': 'المشتريات',
-    'sale_entries': 'المبيعات',
-    'import_batches': 'دفعات الاستيراد',
+  static const Map<String, Bilingual> _tableNames = <String, Bilingual>{
+    'products': Bilingual('الأصناف', 'Items'),
+    'purchase_entries': Bilingual('المشتريات', 'Purchases'),
+    'sale_entries': Bilingual('المبيعات', 'Sales'),
+    'import_batches': Bilingual('دفعات الاستيراد', 'Import batches'),
   };
 
   /// SHA-256 of the compact JSON encoding of the `tables` object.
@@ -67,32 +77,38 @@ class BackupValidator {
     try {
       decoded = jsonDecode(source);
     } on FormatException {
-      throw const FormatException('الملف ليس JSON صالحًا أو أنه غير مكتمل.');
+      throw const LocalizedFormatException('الملف ليس JSON صالحًا أو أنه غير مكتمل.', 'The file is not valid JSON or is incomplete.');
     }
     if (decoded is! Map || decoded['format'] != formatName) {
-      throw const FormatException('الملف ليس نسخة احتياطية من هذا التطبيق.');
+      throw const LocalizedFormatException('الملف ليس نسخة احتياطية من هذا التطبيق.', 'The file is not a backup from this app.');
     }
     final version = decoded['schemaVersion'];
     if (version is! int || !supportedVersions.contains(version)) {
-      throw FormatException('إصدار النسخة الاحتياطية غير مدعوم ($version). قد تكون من إصدار أحدث من التطبيق.');
+      throw LocalizedFormatException(
+        'إصدار النسخة الاحتياطية غير مدعوم ($version). قد تكون من إصدار أحدث من التطبيق.',
+        'Unsupported backup version ($version). It may come from a newer version of the app.',
+      );
     }
     final tables = decoded['tables'];
     if (tables is! Map) {
-      throw const FormatException('النسخة الاحتياطية لا تحتوي على الجداول.');
+      throw const LocalizedFormatException('النسخة الاحتياطية لا تحتوي على الجداول.', 'The backup contains no tables.');
     }
 
     var checksumVerified = false;
     final checksum = decoded['checksum'];
     if (checksum != null) {
       if (checksum is! Map || checksum['algorithm'] != 'sha256' || checksum['value'] is! String) {
-        throw const FormatException('بصمة التحقق في النسخة الاحتياطية غير صالحة.');
+        throw const LocalizedFormatException('بصمة التحقق في النسخة الاحتياطية غير صالحة.', 'The backup checksum is invalid.');
       }
       if (checksumOf(tables) != checksum['value']) {
-        throw const FormatException('بصمة التحقق لا تطابق محتوى الملف؛ الملف تالف أو عُدّل يدويًا.');
+        throw const LocalizedFormatException(
+          'بصمة التحقق لا تطابق محتوى الملف؛ الملف تالف أو عُدّل يدويًا.',
+          'The checksum does not match the content: the file is damaged or was edited by hand.',
+        );
       }
       checksumVerified = true;
     } else if (version >= 3) {
-      throw const FormatException('النسخة الاحتياطية من الإصدار 3 يجب أن تتضمن بصمة تحقق.');
+      throw const LocalizedFormatException('النسخة الاحتياطية من الإصدار 3 يجب أن تتضمن بصمة تحقق.', 'A version 3 backup must include a checksum.');
     }
 
     final products = _table(tables, 'products', required: true, validate: (row, at) => _product(row, at));
@@ -106,14 +122,19 @@ class BackupValidator {
     for (final entry in <List<Map<String, Object?>>>[purchases, sales]) {
       for (final row in entry) {
         if (!productIds.contains(row['product_id'])) {
-          throw FormatException('يوجد سجل سعر مرتبط بصنف غير موجود في النسخة (معرّف ${row['product_id']}).');
+          throw LocalizedFormatException(
+            'يوجد سجل سعر مرتبط بصنف غير موجود في النسخة (معرّف ${row['product_id']}).',
+            'A price record refers to an item that is not in the backup (id ${row['product_id']}).',
+          );
         }
       }
     }
 
     final counts = decoded['counts'];
     if (counts != null) {
-      if (counts is! Map) throw const FormatException('عدادات النسخة الاحتياطية غير صالحة.');
+      if (counts is! Map) {
+        throw const LocalizedFormatException('عدادات النسخة الاحتياطية غير صالحة.', 'The backup record counts are invalid.');
+      }
       final actual = <String, int>{
         'products': products.length,
         'purchase_entries': purchases.length,
@@ -123,7 +144,11 @@ class BackupValidator {
       for (final entry in actual.entries) {
         final expected = counts[entry.key];
         if (expected != null && expected != entry.value) {
-          throw FormatException('عدد السجلات في ${_tableNames[entry.key]} (${entry.value}) لا يطابق العدد المسجل في الملف ($expected).');
+          final table = _tableNames[entry.key]!;
+          throw LocalizedFormatException(
+            'عدد السجلات في ${table.ar} (${entry.value}) لا يطابق العدد المسجل في الملف ($expected).',
+            'The number of records in ${table.en} (${entry.value}) does not match the count in the file ($expected).',
+          );
         }
       }
     }
@@ -143,27 +168,31 @@ class BackupValidator {
     Map tables,
     String name, {
     required bool required,
-    required Map<String, Object?> Function(Map row, String at) validate,
+    required Map<String, Object?> Function(Map row, _At at) validate,
   }) {
     final raw = tables[name];
+    final table = _tableNames[name]!;
     if (raw == null && !required) return <Map<String, Object?>>[];
     if (raw is! List) {
-      throw FormatException('جدول ${_tableNames[name]} مفقود أو غير صالح في النسخة الاحتياطية.');
+      throw LocalizedFormatException(
+        'جدول ${table.ar} مفقود أو غير صالح في النسخة الاحتياطية.',
+        'The ${table.en} table is missing or invalid in the backup.',
+      );
     }
     final result = <Map<String, Object?>>[];
     final seenIds = <Object?>{};
     for (var i = 0; i < raw.length; i++) {
       final row = raw[i];
-      final at = 'السجل رقم ${i + 1} في جدول ${_tableNames[name]}';
-      if (row is! Map) throw FormatException('$at غير صالح.');
+      final at = _At('السجل رقم ${i + 1} في جدول ${table.ar}', 'Record ${i + 1} in ${table.en}');
+      if (row is! Map) at.fail('غير صالح.', 'invalid.');
       final clean = validate(row, at);
-      if (!seenIds.add(clean['id'])) throw FormatException('$at: المعرّف ${clean['id']} مكرر.');
+      if (!seenIds.add(clean['id'])) at.fail('المعرّف ${clean['id']} مكرر.', 'duplicate id ${clean['id']}.');
       result.add(clean);
     }
     return result;
   }
 
-  static Map<String, Object?> _product(Map row, String at) {
+  static Map<String, Object?> _product(Map row, _At at) {
     const allowed = <String>{
       'id', 'name', 'code', 'category', 'unit', 'brand', 'notes', 'is_favorite', 'is_archived',
       'created_at', 'updated_at', 'import_batch_id',
@@ -189,7 +218,7 @@ class BackupValidator {
     };
   }
 
-  static Map<String, Object?> _entry(Map row, String at, {required bool isPurchase, required int version}) {
+  static Map<String, Object?> _entry(Map row, _At at, {required bool isPurchase, required int version}) {
     final dateColumn = isPurchase ? 'purchase_date' : 'sale_date';
     final partyColumn = isPurchase ? 'supplier' : 'customer';
     final allowed = <String>{
@@ -199,15 +228,15 @@ class BackupValidator {
     _rejectUnknown(row, allowed, at);
     final date = row[dateColumn];
     if (date is! String || !_isIsoDate(date)) {
-      throw FormatException('$at: التاريخ غير صالح؛ الصيغة المطلوبة YYYY-MM-DD.');
+      at.fail('التاريخ غير صالح؛ الصيغة المطلوبة YYYY-MM-DD.', 'invalid date; the required format is YYYY-MM-DD.');
     }
     final price = row['unit_price'];
     if (price is! num || !price.isFinite || price < 0) {
-      throw FormatException('$at: السعر غير صالح.');
+      at.fail('السعر غير صالح.', 'invalid price.');
     }
     final quantity = row['quantity'];
     if (quantity is! num || !quantity.isFinite || quantity <= 0) {
-      throw FormatException('$at: الكمية غير صالحة.');
+      at.fail('الكمية غير صالحة.', 'invalid quantity.');
     }
     var currency = row['currency_code'];
     if (currency == null && version == 1) {
@@ -215,10 +244,10 @@ class BackupValidator {
       currency = AppCurrencies.legacyDefault;
     }
     if (!AppCurrencies.isSupported(currency)) {
-      throw FormatException('$at: العملة غير مدعومة ($currency).');
+      at.fail('العملة غير مدعومة ($currency).', 'unsupported currency ($currency).');
     }
     final productId = row['product_id'];
-    if (productId is! int) throw FormatException('$at: معرّف الصنف غير صالح.');
+    if (productId is! int) at.fail('معرّف الصنف غير صالح.', 'invalid item id.');
     return <String, Object?>{
       'id': _positiveId(row, 'id', at),
       'product_id': productId,
@@ -234,16 +263,16 @@ class BackupValidator {
     };
   }
 
-  static Map<String, Object?> _batch(Map row, String at) {
+  static Map<String, Object?> _batch(Map row, _At at) {
     const allowed = <String>{
       'id', 'file_name', 'created_at', 'products_added', 'entries_added', 'unarchived_product_ids', 'undone_at',
     };
     _rejectUnknown(row, allowed, at);
     final id = row['id'];
-    if (id is! String || id.isEmpty) throw FormatException('$at: معرّف الدفعة غير صالح.');
+    if (id is! String || id.isEmpty) at.fail('معرّف الدفعة غير صالح.', 'invalid batch id.');
     int count(String key) {
       final value = row[key] ?? 0;
-      if (value is! int || value < 0) throw FormatException('$at: القيمة $key غير صالحة.');
+      if (value is! int || value < 0) at.fail('القيمة $key غير صالحة.', 'invalid value $key.');
       return value;
     }
 
@@ -259,45 +288,45 @@ class BackupValidator {
     };
   }
 
-  static void _rejectUnknown(Map row, Set<String> allowed, String at) {
+  static void _rejectUnknown(Map row, Set<String> allowed, _At at) {
     for (final key in row.keys) {
       if (key is! String || !allowed.contains(key)) {
-        throw FormatException('$at: الحقل "$key" غير معروف؛ قد تكون النسخة من إصدار أحدث.');
+        at.fail('الحقل "$key" غير معروف؛ قد تكون النسخة من إصدار أحدث.', 'unknown field "$key"; the backup may come from a newer version.');
       }
     }
   }
 
-  static int _positiveId(Map row, String key, String at) {
+  static int _positiveId(Map row, String key, _At at) {
     final value = row[key];
-    if (value is! int || value <= 0) throw FormatException('$at: المعرّف غير صالح.');
+    if (value is! int || value <= 0) at.fail('المعرّف غير صالح.', 'invalid id.');
     return value;
   }
 
-  static String _requiredText(Map row, String key, String at) {
+  static String _requiredText(Map row, String key, _At at) {
     final value = row[key];
-    if (value is! String || value.trim().isEmpty) throw FormatException('$at: الحقل $key مطلوب.');
+    if (value is! String || value.trim().isEmpty) at.fail('الحقل $key مطلوب.', 'field $key is required.');
     return value.trim();
   }
 
-  static String? _optionalText(Map row, String key, String at) {
+  static String? _optionalText(Map row, String key, _At at) {
     final value = row[key];
     if (value == null) return null;
-    if (value is! String) throw FormatException('$at: الحقل $key يجب أن يكون نصًا.');
+    if (value is! String) at.fail('الحقل $key يجب أن يكون نصًا.', 'field $key must be text.');
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  static int _flag(Map row, String key, String at) {
+  static int _flag(Map row, String key, _At at) {
     final value = row[key];
     if (value == 0 || value == false) return 0;
     if (value == 1 || value == true) return 1;
-    throw FormatException('$at: القيمة $key يجب أن تكون 0 أو 1.');
+    at.fail('القيمة $key يجب أن تكون 0 أو 1.', 'value $key must be 0 or 1.');
   }
 
-  static String _timestamp(Map row, String key, String at) {
+  static String _timestamp(Map row, String key, _At at) {
     final value = row[key];
     if (value is! String || DateTime.tryParse(value) == null) {
-      throw FormatException('$at: الوقت $key غير صالح.');
+      at.fail('الوقت $key غير صالح.', 'invalid time $key.');
     }
     return value;
   }

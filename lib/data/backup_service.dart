@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 
 import '../state/app_settings.dart';
+import '../utils/localized_message.dart';
 import 'app_database.dart';
 import 'backup_validator.dart';
 
@@ -102,7 +103,10 @@ class BackupService {
         try {
           await _settings.restoreSettings(previousSettings);
         } catch (rollbackError) {
-          throw StateError('فشلت استعادة قاعدة البيانات، وتعذر التراجع عن الإعدادات. نسخة الأمان محفوظة باسم ${snapshot.fileName}.');
+          throw LocalizedStateError(
+            'فشلت استعادة قاعدة البيانات، وتعذر التراجع عن الإعدادات. نسخة الأمان محفوظة باسم ${snapshot.fileName}.',
+            'Restoring the data failed and the settings could not be rolled back. The safety copy is saved as ${snapshot.fileName}.',
+          );
         }
       }
       rethrow;

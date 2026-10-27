@@ -9,6 +9,7 @@ import 'package:sqflite_common/sqlite_api.dart';
 import '../state/app_settings.dart';
 import '../utils/app_helpers.dart';
 import '../utils/currencies.dart';
+import '../utils/localized_message.dart';
 import 'app_database.dart';
 
 /// One data row of an imported sheet after parsing and row-level validation.
@@ -33,19 +34,21 @@ class SpreadsheetRecord {
   final double? price, quantity;
   final String currency;
   final String? party, invoice, notes, createdAt;
-  final List<String> errors, warnings;
+  final List<Bilingual> errors, warnings;
 
   bool get isValid => errors.isEmpty;
   bool get isPurchase => type == 'PURCHASE';
 }
 
 class SpreadsheetIssue {
-  const SpreadsheetIssue({required this.row, required this.message, required this.isError});
+  const SpreadsheetIssue({required this.row, required this.text, required this.isError});
 
   /// Spreadsheet line number, or 0 for file-level notices.
   final int row;
-  final String message;
+  final Bilingual text;
   final bool isError;
+
+  String get message => text.ar;
 }
 
 /// Result of parsing a file; safe to send between isolates.
@@ -74,8 +77,8 @@ class ImportCandidate {
   final bool archived;
   final Set<CandidateReason> reasons;
 
-  /// Human-readable fields that differ from the imported product (Arabic).
-  final List<String> differences;
+  /// Fields that differ from the imported product.
+  final List<Bilingual> differences;
 }
 
 /// All valid rows of the file that describe the same product.
@@ -94,7 +97,7 @@ class ImportGroup {
   ImportGroupStatus status = ImportGroupStatus.newProduct;
   int? matchedProductId;
   List<ImportCandidate> candidates = const <ImportCandidate>[];
-  final List<String> notices = <String>[];
+  final List<Bilingual> notices = <Bilingual>[];
 
   String get exactKey => SpreadsheetExchange.exactKey(name, unit);
   String get looseKey => SpreadsheetExchange.looseKey(name, unit);
@@ -136,8 +139,8 @@ class SpreadsheetPreview {
   List<SpreadsheetIssue> get issues => <SpreadsheetIssue>[
         ...parsed.fileIssues,
         for (final r in parsed.records) ...[
-          for (final m in r.errors) SpreadsheetIssue(row: r.line, message: m, isError: true),
-          for (final m in r.warnings) SpreadsheetIssue(row: r.line, message: m, isError: false),
+          for (final m in r.errors) SpreadsheetIssue(row: r.line, text: m, isError: true),
+          for (final m in r.warnings) SpreadsheetIssue(row: r.line, text: m, isError: false),
         ],
       ];
 
@@ -210,11 +213,15 @@ class SpreadsheetImportResult {
   final int productsAdded, transactionsAdded, duplicatesSkipped, productsUnarchived;
 }
 
-class SpreadsheetImportException implements Exception {
-  const SpreadsheetImportException(this.message);
-  final String message;
+class SpreadsheetImportException implements Exception, LocalizedMessage {
+  const SpreadsheetImportException(this.ar, this.en);
   @override
-  String toString() => message;
+  final String ar;
+  @override
+  final String en;
+  String get message => ar;
+  @override
+  String toString() => ar;
 }
 
 /// Spreadsheet import/export. Import never overwrites product metadata or
@@ -239,14 +246,19 @@ class SpreadsheetExchange {
     'Record Created At',
   ];
 
-  static const Map<String, String> _fieldLabels = {
-    'type': 'نوع العملية', 'name': 'اسم الصنف', 'unit': 'الوحدة', 'code': 'الكود',
-    'category': 'التصنيف', 'brand': 'العلامة التجارية', 'productNotes': 'ملاحظات الصنف',
-    'date': 'التاريخ', 'purchaseDate': 'تاريخ الشراء', 'saleDate': 'تاريخ البيع',
-    'price': 'السعر', 'purchasePrice': 'سعر الشراء', 'salePrice': 'سعر البيع',
-    'currency': 'العملة', 'quantity': 'الكمية', 'party': 'المورد/العميل',
-    'supplier': 'المورد', 'customer': 'العميل', 'invoice': 'رقم الفاتورة',
-    'notes': 'ملاحظات العملية', 'archived': 'مؤرشف', 'favorite': 'مفضل', 'createdAt': 'وقت الإنشاء',
+  static const Map<String, Bilingual> _fieldLabels = {
+    'type': Bilingual('نوع العملية', 'Type'), 'name': Bilingual('اسم الصنف', 'Product Name'),
+    'unit': Bilingual('الوحدة', 'Unit'), 'code': Bilingual('الكود', 'Code'),
+    'category': Bilingual('التصنيف', 'Category'), 'brand': Bilingual('العلامة التجارية', 'Brand'),
+    'productNotes': Bilingual('ملاحظات الصنف', 'Product Notes'), 'date': Bilingual('التاريخ', 'Date'),
+    'purchaseDate': Bilingual('تاريخ الشراء', 'Purchase Date'), 'saleDate': Bilingual('تاريخ البيع', 'Sale Date'),
+    'price': Bilingual('السعر', 'Price'), 'purchasePrice': Bilingual('سعر الشراء', 'Purchase Price'),
+    'salePrice': Bilingual('سعر البيع', 'Sale Price'), 'currency': Bilingual('العملة', 'Currency'),
+    'quantity': Bilingual('الكمية', 'Quantity'), 'party': Bilingual('المورد/العميل', 'Supplier/Customer'),
+    'supplier': Bilingual('المورد', 'Supplier'), 'customer': Bilingual('العميل', 'Customer'),
+    'invoice': Bilingual('رقم الفاتورة', 'Invoice Number'), 'notes': Bilingual('ملاحظات العملية', 'Entry Notes'),
+    'archived': Bilingual('مؤرشف', 'Archived'), 'favorite': Bilingual('مفضل', 'Favorite'),
+    'createdAt': Bilingual('وقت الإنشاء', 'Created At'),
   };
 
   /// Header aliases after [normalizeColumnHeader]. Role-specific columns
@@ -368,38 +380,54 @@ class SpreadsheetExchange {
 
   /// Pure parsing step (no database). Throws [FormatException] for unreadable files.
   static ParsedSpreadsheet parseSpreadsheet(Uint8List bytes, String filename, {required String defaultCurrency}) {
-    if (bytes.isEmpty) throw const FormatException('الملف فارغ.');
+    if (bytes.isEmpty) throw const LocalizedFormatException('الملف فارغ.', 'The file is empty.');
     if (bytes.length > maxFileBytes) {
-      throw const FormatException('حجم الملف أكبر من 20 ميغابايت. قسّمه إلى ملفات أصغر.');
+      throw const LocalizedFormatException(
+        'حجم الملف أكبر من 20 ميغابايت. قسّمه إلى ملفات أصغر.',
+        'The file is larger than 20 MB. Split it into smaller files.',
+      );
     }
     final lower = filename.toLowerCase();
     final fileIssues = <SpreadsheetIssue>[];
     List<List<String>> matrix;
     if (lower.endsWith('.xls')) {
-      throw const FormatException('صيغة XLS القديمة غير مدعومة. احفظ الملف من Excel بصيغة XLSX أو CSV UTF-8.');
+      throw const LocalizedFormatException(
+        'صيغة XLS القديمة غير مدعومة. احفظ الملف من Excel بصيغة XLSX أو CSV UTF-8.',
+        'The old XLS format is not supported. Save the file from Excel as XLSX or CSV UTF-8.',
+      );
     } else if (lower.endsWith('.csv')) {
       matrix = _readCsv(bytes);
     } else if (lower.endsWith('.xlsx')) {
       try {
         final workbook = Excel.decodeBytes(bytes);
         final sheets = workbook.tables.entries.where((s) => s.value.rows.isNotEmpty).toList();
-        if (sheets.isEmpty) throw const FormatException('لا توجد بيانات في ملف Excel.');
+        if (sheets.isEmpty) {
+          throw const LocalizedFormatException('لا توجد بيانات في ملف Excel.', 'The Excel file contains no data.');
+        }
         if (sheets.length > 1) {
-          fileIssues.add(SpreadsheetIssue(row: 0, isError: false,
-              message: 'يحتوي الملف على ${sheets.length} أوراق؛ قُرئت الورقة الأولى فقط: «${sheets.first.key}».'));
+          fileIssues.add(SpreadsheetIssue(row: 0, isError: false, text: Bilingual(
+            'يحتوي الملف على ${sheets.length} أوراق؛ قُرئت الورقة الأولى فقط: «${sheets.first.key}».',
+            'The file has ${sheets.length} sheets; only the first one was read: "${sheets.first.key}".',
+          )));
         }
         matrix = sheets.first.value.rows.map((row) => row.map(_cellText).toList()).toList();
       } on FormatException {
         rethrow;
       } catch (_) {
-        throw const FormatException('تعذر قراءة ملف XLSX. تأكد أنه سليم وغير محمي بكلمة مرور.');
+        throw const LocalizedFormatException(
+          'تعذر قراءة ملف XLSX. تأكد أنه سليم وغير محمي بكلمة مرور.',
+          'The XLSX file could not be read. Check that it is not damaged or password-protected.',
+        );
       }
     } else {
-      throw const FormatException('الصيغ المدعومة هي XLSX وCSV بترميز UTF-8.');
+      throw const LocalizedFormatException('الصيغ المدعومة هي XLSX وCSV بترميز UTF-8.', 'Supported formats are XLSX and UTF-8 CSV.');
     }
-    if (matrix.isEmpty) throw const FormatException('لا يحتوي الملف على بيانات.');
+    if (matrix.isEmpty) throw const LocalizedFormatException('لا يحتوي الملف على بيانات.', 'The file contains no data.');
     if (matrix.length - 1 > maxDataRows) {
-      throw const FormatException('عدد الصفوف أكبر من 100,000. قسّم الملف إلى ملفات أصغر.');
+      throw const LocalizedFormatException(
+        'عدد الصفوف أكبر من 100,000. قسّم الملف إلى ملفات أصغر.',
+        'The file has more than 100,000 rows. Split it into smaller files.',
+      );
     }
 
     // ---- header mapping
@@ -418,18 +446,26 @@ class SpreadsheetExchange {
       }
     }
     if (!columns.containsKey('name') || !columns.containsKey('unit')) {
-      throw const FormatException('يجب أن يحتوي صف العناوين على عمودي اسم الصنف ووحدة القياس.');
+      throw const LocalizedFormatException(
+        'يجب أن يحتوي صف العناوين على عمودي اسم الصنف ووحدة القياس.',
+        'The header row must contain the Product Name and Unit columns.',
+      );
     }
     for (final entry in columns.entries) {
       if (entry.value.length > 1) {
-        final titles = entry.value.map((i) => '«${header[i].trim()}»').join(' و');
-        fileIssues.add(SpreadsheetIssue(row: 0, isError: true,
-            message: 'الأعمدة $titles تمثل الحقل نفسه (${_fieldLabels[entry.key]}). احذف المكرر حتى لا تُستخدم قيمة خاطئة.'));
+        final titles = entry.value.map((i) => header[i].trim());
+        final label = _fieldLabels[entry.key]!;
+        fileIssues.add(SpreadsheetIssue(row: 0, isError: true, text: Bilingual(
+          'الأعمدة ${titles.map((t) => '«$t»').join(' و')} تمثل الحقل نفسه (${label.ar}). احذف المكرر حتى لا تُستخدم قيمة خاطئة.',
+          'The columns ${titles.map((t) => '"$t"').join(' and ')} are the same field (${label.en}). Remove the duplicate so a wrong value is not used.',
+        )));
       }
     }
     if (ignored.isNotEmpty) {
-      fileIssues.add(SpreadsheetIssue(row: 0, isError: false,
-          message: 'أعمدة غير معروفة لن تُستورد: ${ignored.map((t) => '«$t»').join('، ')}.'));
+      fileIssues.add(SpreadsheetIssue(row: 0, isError: false, text: Bilingual(
+        'أعمدة غير معروفة لن تُستورد: ${ignored.map((t) => '«$t»').join('، ')}.',
+        'Unknown columns will not be imported: ${ignored.map((t) => '"$t"').join(', ')}.',
+      )));
     }
 
     // ---- rows
@@ -467,10 +503,10 @@ class SpreadsheetExchange {
       final invoice = isSale ? '' : invoiceRaw;
       final notes = get('notes');
       final hasTransaction = [get('type'), dateRaw, priceRaw, quantityRaw, party, invoiceRaw, notes].any((v) => v.isNotEmpty);
-      final errors = <String>[];
-      final warnings = <String>[];
-      if (name.isEmpty) errors.add('اسم الصنف مطلوب.');
-      if (unit.isEmpty) errors.add('وحدة القياس مطلوبة.');
+      final errors = <Bilingual>[];
+      final warnings = <Bilingual>[];
+      if (name.isEmpty) errors.add(const Bilingual('اسم الصنف مطلوب.', 'The product name is required.'));
+      if (unit.isEmpty) errors.add(const Bilingual('وحدة القياس مطلوبة.', 'The unit is required.'));
       String? date;
       double? price;
       double? quantity;
@@ -478,12 +514,17 @@ class SpreadsheetExchange {
       if (hasTransaction) {
         final parsedDate = _parseDate(dateRaw);
         date = parsedDate?.iso;
-        if (type.isEmpty) errors.add('نوع العملية مطلوب: PURCHASE أو SALE (شراء أو بيع).');
+        if (type.isEmpty) {
+          errors.add(const Bilingual('نوع العملية مطلوب: PURCHASE أو SALE (شراء أو بيع).', 'The type is required: PURCHASE or SALE.'));
+        }
         if (date == null) {
           if (parsedDate != null && parsedDate.kind == _DateKind.dayMonth && parsedDate.second > 12 && parsedDate.first <= 12) {
-            errors.add('التاريخ «$dateRaw» يبدو بصيغة شهر/يوم/سنة. استخدم YYYY-MM-DD أو يوم/شهر/سنة.');
+            errors.add(Bilingual(
+              'التاريخ «$dateRaw» يبدو بصيغة شهر/يوم/سنة. استخدم YYYY-MM-DD أو يوم/شهر/سنة.',
+              'The date "$dateRaw" looks like month/day/year. Use YYYY-MM-DD or day/month/year.',
+            ));
           } else {
-            errors.add('التاريخ غير صحيح؛ استخدم YYYY-MM-DD أو DD/MM/YYYY.');
+            errors.add(const Bilingual('التاريخ غير صحيح؛ استخدم YYYY-MM-DD أو DD/MM/YYYY.', 'Invalid date; use YYYY-MM-DD or DD/MM/YYYY.'));
           }
         } else if (parsedDate!.kind == _DateKind.dayMonth) {
           if (parsedDate.first > 12) dayFirstProven = true;
@@ -493,15 +534,27 @@ class SpreadsheetExchange {
         }
         price = parseLocalizedNumber(priceRaw);
         quantity = parseLocalizedNumber(quantityRaw);
-        if (price == null || price < 0) errors.add('سعر الوحدة مطلوب ويجب ألا يكون سالبًا.');
-        if (quantity == null || quantity <= 0) errors.add('الكمية مطلوبة ويجب أن تكون أكبر من صفر.');
+        if (price == null || price < 0) {
+          errors.add(const Bilingual('سعر الوحدة مطلوب ويجب ألا يكون سالبًا.', 'The unit price is required and cannot be negative.'));
+        }
+        if (quantity == null || quantity <= 0) {
+          errors.add(const Bilingual('الكمية مطلوبة ويجب أن تكون أكبر من صفر.', 'The quantity is required and must be greater than zero.'));
+        }
         if (currency.isEmpty) {
           currency = defaultCurrency;
-          warnings.add('العملة غير محددة؛ ستُستخدم العملة الافتراضية $currency.');
+          warnings.add(Bilingual(
+            'العملة غير محددة؛ ستُستخدم العملة الافتراضية $currency.',
+            'No currency given; the default currency $currency will be used.',
+          ));
         }
-        if (!AppCurrencies.isSupported(currency)) errors.add('العملة يجب أن تكون ${AppCurrencies.supported.join(' أو ')}.');
+        if (!AppCurrencies.isSupported(currency)) {
+          errors.add(Bilingual(
+            'العملة يجب أن تكون ${AppCurrencies.supported.join(' أو ')}.',
+            'The currency must be ${AppCurrencies.supported.join(', ')}.',
+          ));
+        }
         if (isSale && invoiceRaw.isNotEmpty) {
-          warnings.add('رقم الفاتورة غير مدعوم في سجلات البيع؛ سيُتجاهل.');
+          warnings.add(const Bilingual('رقم الفاتورة غير مدعوم في سجلات البيع؛ سيُتجاهل.', 'Sale records have no invoice number; it will be ignored.'));
         }
       }
       String? created;
@@ -509,7 +562,7 @@ class SpreadsheetExchange {
       if (createdRaw.isNotEmpty) {
         final parsed = DateTime.tryParse(createdRaw);
         if (parsed == null) {
-          warnings.add('وقت إنشاء السجل غير صالح؛ سيُستخدم الوقت الحالي.');
+          warnings.add(const Bilingual('وقت إنشاء السجل غير صالح؛ سيُستخدم الوقت الحالي.', 'Invalid record creation time; the current time will be used.'));
         } else {
           created = parsed.toIso8601String();
         }
@@ -524,25 +577,35 @@ class SpreadsheetExchange {
         createdAt: created, errors: errors, warnings: warnings,
       ));
     }
-    if (records.isEmpty) throw const FormatException('لا يحتوي الملف على صفوف بيانات بعد صف العناوين.');
+    if (records.isEmpty) {
+      throw const LocalizedFormatException('لا يحتوي الملف على صفوف بيانات بعد صف العناوين.', 'The file has no data rows after the header row.');
+    }
     if (ambiguousDates.isNotEmpty && !dayFirstProven) {
-      fileIssues.add(SpreadsheetIssue(row: 0, isError: false,
-          message: 'قُرئت ${ambiguousDates.length} تواريخ بصيغة يوم/شهر/سنة (مثل 03/04/2026 = 3 أبريل). '
-              'تأكد أن الملف لا يستخدم صيغة شهر/يوم/سنة.'));
+      fileIssues.add(SpreadsheetIssue(row: 0, isError: false, text: Bilingual(
+        'قُرئت ${ambiguousDates.length} تواريخ بصيغة يوم/شهر/سنة (مثل 03/04/2026 = 3 أبريل). '
+            'تأكد أن الملف لا يستخدم صيغة شهر/يوم/سنة.',
+        '${ambiguousDates.length} dates were read as day/month/year (03/04/2026 = 3 April). '
+            'Make sure the file does not use month/day/year.',
+      )));
     }
     return ParsedSpreadsheet(records: records, fileIssues: fileIssues, ignoredColumns: ignored);
   }
 
   static List<List<String>> _readCsv(Uint8List bytes) {
     if (bytes.length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF))) {
-      throw const FormatException('الملف بترميز UTF-16. احفظه من Excel بصيغة «CSV UTF-8» أو XLSX.');
+      throw const LocalizedFormatException(
+        'الملف بترميز UTF-16. احفظه من Excel بصيغة «CSV UTF-8» أو XLSX.',
+        'The file is UTF-16 encoded. Save it from Excel as "CSV UTF-8" or XLSX.',
+      );
     }
     final String source;
     try {
       source = utf8.decode(bytes, allowMalformed: false);
     } on FormatException {
-      throw const FormatException(
-          'ترميز الملف ليس UTF-8 (غالبًا Windows-1256 من Excel). احفظه بصيغة «CSV UTF-8 (Comma delimited)» أو XLSX ثم أعد المحاولة.');
+      throw const LocalizedFormatException(
+        'ترميز الملف ليس UTF-8 (غالبًا Windows-1256 من Excel). احفظه بصيغة «CSV UTF-8 (Comma delimited)» أو XLSX ثم أعد المحاولة.',
+        'The file is not UTF-8 (often Windows-1256 from Excel). Save it as "CSV UTF-8 (Comma delimited)" or XLSX and try again.',
+      );
     }
     final text = source.replaceFirst('\uFEFF', '').replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     List<List<String>> parse(String delimiter) => CsvToListConverter(
@@ -629,18 +692,24 @@ class SpreadsheetExchange {
     }
     for (final similar in byFileLoose.values.where((list) => list.length > 1)) {
       for (final g in similar) {
-        final others = similar.where((o) => o != g).map((o) => '«${o.name}»').join('، ');
-        g.notices.add('في الملف أسماء متشابهة بترتيب كلمات أو كود مختلف: $others. ستُعامل كأصناف منفصلة.');
+        final others = similar.where((o) => o != g).map((o) => o.name);
+        g.notices.add(Bilingual(
+          'في الملف أسماء متشابهة بترتيب كلمات أو كود مختلف: ${others.map((n) => '«$n»').join('، ')}. ستُعامل كأصناف منفصلة.',
+          'The file has similar names with another word order or code: ${others.map((n) => '"$n"').join(', ')}. They stay separate products.',
+        ));
       }
     }
     for (final g in groups) {
       if (g.status == ImportGroupStatus.newProduct && g.purchaseCount == 0) {
         g.notices.add(g.saleCount == 0
-            ? 'صنف جديد بلا سجلات أسعار؛ سيُضاف بياناته فقط.'
-            : 'صنف جديد بلا سعر شراء؛ سيحتوي على سجلات بيع فقط.');
+            ? const Bilingual('صنف جديد بلا سجلات أسعار؛ ستُضاف بياناته فقط.', 'New product without price records; only its details are added.')
+            : const Bilingual('صنف جديد بلا سعر شراء؛ سيحتوي على سجلات بيع فقط.', 'New product without a purchase price; it will only have sale records.'));
       }
       if (g.status == ImportGroupStatus.matched && g.fileArchived) {
-        g.notices.add('الملف يحدد الصنف كمؤرشف بينما الصنف الموجود نشط؛ لن تتغير حالته.');
+        g.notices.add(const Bilingual(
+          'الملف يحدد الصنف كمؤرشف بينما الصنف الموجود نشط؛ لن تتغير حالته.',
+          'The file marks the product as archived but the existing one is active; its status stays as it is.',
+        ));
       }
     }
     return SpreadsheetPreview(fileName: fileName, parsed: parsed, groups: groups);
@@ -684,13 +753,16 @@ class SpreadsheetExchange {
       );
       bool differs(String? Function(SpreadsheetRecord r) read) =>
           rows.map(read).whereType<String>().where((v) => v.isNotEmpty).map(normalizeForSearch).toSet().length > 1;
-      final mixed = <String>[
-        if (differs((r) => r.category)) 'التصنيف',
-        if (differs((r) => r.brand)) 'العلامة التجارية',
-        if (differs((r) => r.productNotes)) 'ملاحظات الصنف',
+      final mixed = <Bilingual>[
+        if (differs((r) => r.category)) _fieldLabels['category']!,
+        if (differs((r) => r.brand)) _fieldLabels['brand']!,
+        if (differs((r) => r.productNotes)) _fieldLabels['productNotes']!,
       ];
       if (mixed.isNotEmpty) {
-        group.notices.add('قيم ${mixed.join(' و')} مختلفة بين صفوف الصنف؛ ستُستخدم أول قيمة غير فارغة.');
+        group.notices.add(Bilingual(
+          'قيم ${mixed.map((m) => m.ar).join(' و')} مختلفة بين صفوف الصنف؛ ستُستخدم أول قيمة غير فارغة.',
+          '${mixed.map((m) => m.en).join(' and ')} differ between the rows of this product; the first non-empty value is used.',
+        ));
       }
       result.add(group);
     }
@@ -712,14 +784,20 @@ class SpreadsheetExchange {
         if (exactKey(name, unit) != g.exactKey && looseKey(name, unit) == g.looseKey) CandidateReason.reorderedName,
       };
       bool same(String? a, String? b) => normalizeForSearch(a ?? '') == normalizeForSearch(b ?? '');
-      final differences = <String>[
-        if (!same(name, g.name)) 'الاسم: «$name» مقابل «${g.name}» في الملف',
-        if (!same(unit, g.unit)) 'الوحدة: «$unit» مقابل «${g.unit}»',
-        if (!same(code, g.code)) 'الكود: «${code ?? '—'}» مقابل «${g.code ?? '—'}»',
-        if (g.category != null && !same(p['category'] as String?, g.category))
-          'التصنيف: «${p['category'] ?? '—'}» مقابل «${g.category}»',
-        if (g.brand != null && !same(p['brand'] as String?, g.brand))
-          'العلامة: «${p['brand'] ?? '—'}» مقابل «${g.brand}»',
+      Bilingual diff(String field, Object? existing, Object? file) {
+        final label = _fieldLabels[field]!;
+        return Bilingual(
+          '${label.ar}: «${existing ?? '—'}» مقابل «${file ?? '—'}» في الملف',
+          '${label.en}: "${existing ?? '—'}" vs "${file ?? '—'}" in the file',
+        );
+      }
+
+      final differences = <Bilingual>[
+        if (!same(name, g.name)) diff('name', name, g.name),
+        if (!same(unit, g.unit)) diff('unit', unit, g.unit),
+        if (!same(code, g.code)) diff('code', code, g.code),
+        if (g.category != null && !same(p['category'] as String?, g.category)) diff('category', p['category'], g.category),
+        if (g.brand != null && !same(p['brand'] as String?, g.brand)) diff('brand', p['brand'], g.brand),
       ];
       result.add(ImportCandidate(
         productId: id, name: name, unit: unit, code: code, category: p['category'] as String?,
@@ -819,11 +897,17 @@ class SpreadsheetExchange {
     return db.transaction((txn) async {
       final fresh = await analyze(preview.parsed, preview.fileName, txn);
       if (!_sameAnalysis(preview, fresh)) {
-        throw const SpreadsheetImportException('تغيرت بيانات الأصناف منذ المعاينة؛ أعد المعاينة ثم حاول مجددًا. لم يُكتب أي شيء.');
+        throw const SpreadsheetImportException(
+          'تغيرت بيانات الأصناف منذ المعاينة؛ أعد المعاينة ثم حاول مجددًا. لم يُكتب أي شيء.',
+          'Products changed since the preview; preview the file again and retry. Nothing was written.',
+        );
       }
       final plan = await _plan(fresh, decisions, txn);
       if (!plan.canImport(acceptRejectedRows: acceptRejectedRows, includeDuplicates: includeDuplicates)) {
-        throw const SpreadsheetImportException('الاستيراد غير مكتمل الشروط: راجع القرارات والأخطاء. لم يُكتب أي شيء.');
+        throw const SpreadsheetImportException(
+          'الاستيراد غير مكتمل الشروط: راجع القرارات والأخطاء. لم يُكتب أي شيء.',
+          'The import is not ready: review the decisions and errors. Nothing was written.',
+        );
       }
       final batchId = AppDatabase.newImportBatchId();
       final now = DateTime.now().toIso8601String();
@@ -939,7 +1023,7 @@ class SpreadsheetExchange {
       }).toList());
     }
     final bytes = workbook.encode();
-    if (bytes == null || bytes.isEmpty) throw StateError('تعذر إنشاء ملف Excel.');
+    if (bytes == null || bytes.isEmpty) throw LocalizedStateError('تعذر إنشاء ملف Excel.', 'The Excel file could not be created.');
     return Uint8List.fromList(bytes);
   }
 

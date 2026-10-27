@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import '../data/app_database.dart';
 import '../models/price_entry.dart';
 import '../models/product.dart';
+import '../ui/ui.dart';
 import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
+import '../utils/error_messages.dart';
+import '../utils/localized_message.dart';
 import 'price_entry_form_screen.dart';
 import 'product_form_screen.dart';
 
+/// One product: its details, latest prices and full purchase/sale history.
 class ProductDetailsScreen extends StatefulWidget {
   const ProductDetailsScreen({super.key, required this.productId});
   final int productId;
@@ -17,11 +21,15 @@ class ProductDetailsScreen extends StatefulWidget {
 }
 
 class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
-  bool _loading = true;
-  String? _error;
+  static const int _pageSize = 30;
+
   Product? _product;
-  List<PriceEntry> _purchases = [];
-  List<PriceEntry> _sales = [];
+  Object? _error;
+  bool _loading = true;
+  bool _showPurchases = true;
+  final List<PriceEntry> _purchases = <PriceEntry>[];
+  final List<PriceEntry> _sales = <PriceEntry>[];
+  bool _loadingMore = false;
 
   @override
   void initState() {
@@ -32,318 +40,417 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   Future<void> _load() async {
     try {
       final db = AppDatabase.instance;
-      final rawProduct = await db.getProduct(widget.productId);
-      if (rawProduct == null) throw StateError('لم يتم العثور على الصنف.');
-      final purchases = await db.getPurchaseHistory(widget.productId);
-      final sales = await db.getSaleHistory(widget.productId);
+      final raw = await db.getProduct(widget.productId);
+      if (raw == null) {
+        throw LocalizedStateError('لم يُعثر على الصنف؛ ربما حُذف بالتراجع عن استيراد.', 'The item was not found; an import undo may have removed it.');
+      }
+      final product = Product.fromMap(raw);
+      // Keep at least as many rows as already shown, so editing an old entry
+      // does not collapse the list the user scrolled through.
+      final purchases = await db.getPurchaseHistory(widget.productId, limit: _pageSize.clamp(_purchases.length, 100000));
+      final sales = await db.getSaleHistory(widget.productId, limit: _pageSize.clamp(_sales.length, 100000));
       if (!mounted) return;
       setState(() {
-        _product = Product.fromMap(rawProduct);
-        _purchases = purchases.map(PriceEntry.fromMap).toList();
-        _sales = sales.map(PriceEntry.fromMap).toList();
-        _loading = false;
+        _product = product;
+        _purchases
+          ..clear()
+          ..addAll(purchases.map(PriceEntry.fromMap));
+        _sales
+          ..clear()
+          ..addAll(sales.map(PriceEntry.fromMap));
         _error = null;
+        _loading = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
+        _error = error;
         _loading = false;
-        _error = error.toString();
       });
     }
   }
 
-  Future<void> _addEntry({required bool purchase}) async {
-    final product = _product;
-    if (product == null) return;
-    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => PriceEntryFormScreen(productId: product.id, productName: product.name, isPurchase: purchase),
-    ));
-    if (saved == true && mounted) await _load();
-  }
-
-
-  Future<void> _editHistoryEntry(PriceEntry entry, {required bool purchase}) async {
-    final product = _product;
-    if (product == null) return;
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => PriceEntryFormScreen(
-          productId: product.id,
-          productName: product.name,
-          isPurchase: purchase,
-          entry: entry,
-        ),
-      ),
-    );
-    if (saved == true && mounted) await _load();
-  }
-
-  Future<void> _deleteHistoryEntry(PriceEntry entry, {required bool purchase}) async {
-    final product = _product;
-    if (product == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(appTextValue('تأكيد حذف العملية', 'Confirm transaction deletion')),
-        content: Text(appTextValue(
-          'سيتم حذف هذه العملية من السجل نهائيًا، ولا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
-          'This transaction will be permanently deleted and cannot be recovered. Continue?',
-        )),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const AppText(ar: 'إلغاء', en: 'Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.error,
-              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const AppText(ar: 'حذف العملية', en: 'Delete transaction'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+  Future<void> _loadMore() async {
+    if (_loadingMore) return;
+    setState(() => _loadingMore = true);
     try {
-      if (purchase) {
-        await AppDatabase.instance.deletePurchaseEntry(
-          id: entry.id,
-          productId: product.id,
-        );
-      } else {
-        await AppDatabase.instance.deleteSaleEntry(
-          id: entry.id,
-          productId: product.id,
-        );
-      }
+      final db = AppDatabase.instance;
+      final purchases = _showPurchases;
+      final rows = purchases
+          ? await db.getPurchaseHistory(widget.productId, limit: _pageSize, offset: _purchases.length)
+          : await db.getSaleHistory(widget.productId, limit: _pageSize, offset: _sales.length);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(appTextValue('تم حذف العملية.', 'Transaction deleted.'))),
-      );
+      setState(() => (purchases ? _purchases : _sales).addAll(rows.map(PriceEntry.fromMap)));
+    } catch (error) {
+      if (mounted) showMessage(context, friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  Future<void> _push(Widget screen) async {
+    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => screen));
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _run(Future<void> Function() action, {String? done}) async {
+    try {
+      await action();
+      if (!mounted) return;
+      if (done != null) showMessage(context, done);
       await _load();
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            appTextValue('تعذر حذف العملية: ', 'Could not delete transaction: ') +
-                error.toString(),
-          ),
-        ),
-      );
+      if (mounted) showMessage(context, friendlyError(error));
     }
   }
 
-  Future<void> _editProduct() async {
-    final product = _product;
-    if (product == null) return;
-    final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ProductFormScreen(product: product)));
-    if (saved == true && mounted) await _load();
+  Future<void> _deleteEntry(PriceEntry entry, {required bool purchase}) async {
+    final product = _product!;
+    final confirmed = await showConfirmDialog(
+      context,
+      title: appTextValue('حذف العملية؟', 'Delete this record?'),
+      message: appTextValue(
+        'سيُحذف سجل ${purchase ? 'الشراء' : 'البيع'} بتاريخ ${formatDate(entry.date)} بسعر ${formatAmount(context, entry.unitPrice, entry.currencyCode)} نهائيًا. '
+            'لا يمكن التراجع إلا باستعادة نسخة احتياطية.',
+        'The ${purchase ? 'purchase' : 'sale'} of ${formatDate(entry.date, 'en')} at ${formatAmount(context, entry.unitPrice, entry.currencyCode)} will be deleted. '
+            'It can only be recovered from a backup.',
+      ),
+      confirmLabel: appTextValue('حذف', 'Delete'),
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    final db = AppDatabase.instance;
+    await _run(
+      () => purchase
+          ? db.deletePurchaseEntry(id: entry.id, productId: product.id)
+          : db.deleteSaleEntry(id: entry.id, productId: product.id),
+      done: appTextValue('حُذفت العملية.', 'Record deleted.'),
+    );
   }
 
-  Future<void> _archiveProduct() async {
-    final product = _product;
-    if (product == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const AppText(ar: 'أرشفة الصنف', en: 'Archive item'),
-        content: Text(appTextValue('سيختفي «${product.name}» من قائمة البحث، مع الاحتفاظ بسجل الشراء والبيع. هل تريد المتابعة؟', '“${product.name}” will be hidden from search while purchase and sale history are kept. Continue?')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const AppText(ar: 'إلغاء', en: 'Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const AppText(ar: 'أرشفة', en: 'Archive')),
-        ],
+  Future<void> _archive() async {
+    final product = _product!;
+    final confirmed = await showConfirmDialog(
+      context,
+      title: appTextValue('أرشفة الصنف؟', 'Archive this item?'),
+      message: appTextValue(
+        'سيختفي «${product.name}» من قائمة الأصناف مع الاحتفاظ بكامل سجله. يمكنك إعادته من «المؤرشفة» في أي وقت.',
+        '"${product.name}" will be hidden from the item list and its full history kept. You can restore it from "Archived" at any time.',
       ),
+      confirmLabel: appTextValue('أرشفة', 'Archive'),
     );
-    if (confirmed != true) return;
-    await AppDatabase.instance.archiveProduct(product.id);
-    if (mounted) Navigator.of(context).pop();
+    if (!confirmed || !mounted) return;
+    await _run(() => AppDatabase.instance.archiveProduct(product.id), done: appTextValue('أُرشف الصنف.', 'Item archived.'));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_error != null || _product == null) {
-      return Scaffold(appBar: AppBar(), body: Center(child: Text('${appTextValue('تعذر فتح الصنف', 'Could not open item')}: $_error')));
+    if (_loading) return Scaffold(appBar: AppBar(), body: const LoadingState());
+    final product = _product;
+    if (_error != null || product == null) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: ErrorState(
+          error: _error ?? StateError('missing product'),
+          onRetry: () {
+            setState(() => _loading = true);
+            _load();
+          },
+          title: appTextValue('تعذر فتح الصنف', 'Could not open the item'),
+        ),
+      );
     }
-    final product = _product!;
+    final entries = _showPurchases ? _purchases : _sales;
+    final total = _showPurchases ? product.purchaseCount : product.saleCount;
     return Scaffold(
       appBar: AppBar(
-        title: const AppText(ar: 'تفاصيل الصنف', en: 'Item details'),
+        title: Text(appTextValue('تفاصيل الصنف', 'Item details')),
         actions: [
-          IconButton(tooltip: appTextValue('تعديل', 'Edit'), onPressed: _editProduct, icon: const Icon(Icons.edit_outlined)),
+          if (!product.isArchived) ...[
+            IconButton(
+              tooltip: product.isFavorite
+                  ? appTextValue('إزالة من المفضلة', 'Remove from favorites')
+                  : appTextValue('إضافة إلى المفضلة', 'Add to favorites'),
+              isSelected: product.isFavorite,
+              icon: const Icon(Icons.star_border_rounded),
+              selectedIcon: Icon(Icons.star_rounded, color: context.palette.favorite),
+              onPressed: () => _run(() => AppDatabase.instance.setFavorite(product.id, !product.isFavorite)),
+            ),
+            IconButton(
+              tooltip: appTextValue('تعديل بيانات الصنف', 'Edit item'),
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _push(ProductFormScreen(product: product)),
+            ),
+          ],
           PopupMenuButton<String>(
+            tooltip: appTextValue('خيارات أخرى', 'More options'),
             onSelected: (value) {
-              if (value == 'archive') _archiveProduct();
-              if (value == 'favorite') AppDatabase.instance.setFavorite(product.id, !product.isFavorite).then((_) => _load());
+              if (value == 'archive') _archive();
+              if (value == 'unarchive') {
+                _run(() => AppDatabase.instance.unarchiveProduct(product.id), done: appTextValue('أُعيد الصنف.', 'Item restored.'));
+              }
             },
             itemBuilder: (_) => [
-              PopupMenuItem(value: 'favorite', child: Text(appTextValue(product.isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', product.isFavorite ? 'Remove from favorites' : 'Add to favorites'))),
-              PopupMenuItem(value: 'archive', child: Text(appTextValue('أرشفة الصنف', 'Archive item'))),
+              if (product.isArchived)
+                PopupMenuItem(value: 'unarchive', child: Text(appTextValue('إلغاء الأرشفة', 'Restore from archive')))
+              else
+                PopupMenuItem(value: 'archive', child: Text(appTextValue('أرشفة الصنف', 'Archive item'))),
             ],
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    CircleAvatar(radius: 25, child: const Icon(Icons.inventory_2_outlined, size: 27)),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(product.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900))),
-                  ]),
-                  const SizedBox(height: 14),
-                  _detailLine(appTextValue('الكود', 'Code'), product.code),
-                  _detailLine(appTextValue('التصنيف', 'Category'), product.category == null ? null : localizeCatalogValue(context, product.category!)),
-                  _detailLine(appTextValue('الوحدة', 'Unit'), localizeCatalogValue(context, product.unit)),
-                  _detailLine(appTextValue('العلامة التجارية / الموديل', 'Brand / model'), product.brand),
-                  _detailLine(appTextValue('ملاحظات', 'Notes'), product.notes),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: _CurrentPrice(label: appTextValue('آخر شراء', 'Latest purchase'), price: product.latestPurchasePrice, date: product.latestPurchaseDate, currency: product.latestPurchaseCurrency ?? 'YER', icon: Icons.shopping_cart_outlined)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _CurrentPrice(label: appTextValue('آخر بيع', 'Latest sale'), price: product.latestSalePrice, date: product.latestSaleDate, currency: product.latestSaleCurrency ?? 'YER', icon: Icons.sell_outlined)),
-                  ]),
-                  const SizedBox(height: 10),
-                  Text('${appTextValue('الفرق بين آخر سعر بيع وشراء', 'Difference between latest sale and purchase')}: ${_priceDifference(context, product)}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  const AppText(ar: 'هذا فرق سعري فقط، ولا يمثل صافي الربح بعد المصاريف والضرائب والخصومات.', en: 'This is only a price difference, not net profit after expenses, taxes, or discounts.', style: TextStyle(fontSize: 12)),
-                ]),
+      body: PageBody(
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xxl),
+            children: [
+              _Header(product: product),
+              if (product.isArchived)
+                NoticeBanner(
+                  kind: NoticeKind.warning,
+                  margin: const EdgeInsets.only(top: Space.md),
+                  text: appTextValue(
+                    'هذا الصنف مؤرشف: لا يظهر في البحث ولا تُضاف له عمليات حتى تُلغى أرشفته. سجله محفوظ كاملًا.',
+                    'This item is archived: it is hidden from search and takes no new records until restored. Its history is kept.',
+                  ),
+                  action: TextButton(
+                    onPressed: () => _run(() => AppDatabase.instance.unarchiveProduct(product.id),
+                        done: appTextValue('أُعيد الصنف.', 'Item restored.')),
+                    child: Text(appTextValue('إلغاء الأرشفة', 'Restore')),
+                  ),
+                ),
+              const SizedBox(height: Space.lg),
+              PriceTile(
+                kind: PriceKind.purchase,
+                large: true,
+                price: product.latestPurchasePrice,
+                currency: product.latestPurchaseCurrency,
+                date: product.latestPurchaseDate,
+                party: product.latestPurchaseSupplier,
+                quantity: product.latestPurchaseQuantity,
+                unit: product.unit,
               ),
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: FilledButton.icon(onPressed: () => _addEntry(purchase: true), icon: const Icon(Icons.add_shopping_cart), label: const AppText(ar: 'إضافة شراء', en: 'Add purchase'))),
-              const SizedBox(width: 10),
-              Expanded(child: FilledButton.tonalIcon(onPressed: () => _addEntry(purchase: false), icon: const Icon(Icons.point_of_sale_outlined), label: const AppText(ar: 'إضافة بيع', en: 'Add sale'))),
-            ]),
-            const SizedBox(height: 20),
-            _HistorySection(title: appTextValue('سجل المشتريات', 'Purchase history'), icon: Icons.shopping_cart_outlined, entries: _purchases, isPurchase: true, unit: product.unit, onEdit: (entry) => _editHistoryEntry(entry, purchase: true), onDelete: (entry) => _deleteHistoryEntry(entry, purchase: true)),
-            const SizedBox(height: 14),
-            _HistorySection(title: appTextValue('سجل المبيعات', 'Sales history'), icon: Icons.sell_outlined, entries: _sales, isPurchase: false, unit: product.unit, onEdit: (entry) => _editHistoryEntry(entry, purchase: false), onDelete: (entry) => _deleteHistoryEntry(entry, purchase: false)),
-          ],
+              const SizedBox(height: Space.sm),
+              PriceTile(
+                kind: PriceKind.sale,
+                large: true,
+                price: product.latestSalePrice,
+                currency: product.latestSaleCurrency,
+                date: product.latestSaleDate,
+                party: product.latestSaleCustomer,
+                quantity: product.latestSaleQuantity,
+                unit: product.unit,
+              ),
+              _Difference(product: product),
+              if (!product.isArchived) ...[
+                const SizedBox(height: Space.lg),
+                RecordButtons(
+                  filled: true,
+                  onPurchase: () => _push(PriceEntryFormScreen(product: product, isPurchase: true)),
+                  onSale: () => _push(PriceEntryFormScreen(product: product, isPurchase: false)),
+                ),
+              ],
+              SectionHeader(appTextValue('السجل', 'History')),
+              SegmentedButton<bool>(
+                segments: [
+                  ButtonSegment(
+                    value: true,
+                    icon: const Icon(Icons.shopping_cart_outlined),
+                    label: Text(appTextValue('المشتريات (${product.purchaseCount})', 'Purchases (${product.purchaseCount})')),
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    icon: const Icon(Icons.sell_outlined),
+                    label: Text(appTextValue('المبيعات (${product.saleCount})', 'Sales (${product.saleCount})')),
+                  ),
+                ],
+                selected: {_showPurchases},
+                showSelectedIcon: false,
+                onSelectionChanged: (value) => setState(() => _showPurchases = value.single),
+              ),
+              const SizedBox(height: Space.md),
+              if (entries.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: Space.xl),
+                  child: Text(
+                    _showPurchases
+                        ? appTextValue('لا توجد عمليات شراء مسجلة.', 'No purchases recorded.')
+                        : appTextValue('لا توجد عمليات بيع مسجلة.', 'No sales recorded.'),
+                    textAlign: TextAlign.center,
+                    style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
+                  ),
+                )
+              else
+                Card(
+                  child: Column(children: [
+                    for (var i = 0; i < entries.length; i++) ...[
+                      if (i > 0) const Divider(indent: Space.lg, endIndent: Space.lg),
+                      _EntryTile(
+                        entry: entries[i],
+                        purchase: _showPurchases,
+                        unit: product.unit,
+                        onEdit: () => _push(PriceEntryFormScreen(product: product, isPurchase: _showPurchases, entry: entries[i])),
+                        onDelete: () => _deleteEntry(entries[i], purchase: _showPurchases),
+                      ),
+                    ],
+                  ]),
+                ),
+              if (entries.length < total)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.sm),
+                  child: Center(
+                    child: _loadingMore
+                        ? const LoadingState()
+                        : TextButton(
+                            onPressed: _loadMore,
+                            child: Text(appTextValue(
+                              'عرض المزيد (${entries.length} من $total)',
+                              'Show more (${entries.length} of $total)',
+                            )),
+                          ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _detailLine(String label, String? value) {
-    if (value == null || value.trim().isEmpty) return const SizedBox.shrink();
+class _Header extends StatelessWidget {
+  const _Header({required this.product});
+  final Product product;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget line(IconData icon, String label, String value, {bool ltr = false}) => Padding(
+          padding: const EdgeInsets.only(top: Space.sm),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, size: Sizes.iconMd, color: context.colors.onSurfaceVariant),
+            const SizedBox(width: Space.sm),
+            SizedBox(width: 96, child: Text(label, style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant))),
+            Expanded(child: SelectableText(ltr ? ltrIsolate(value) : value, style: context.text.bodyMedium)),
+          ]),
+        );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(Space.lg),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SelectableText(product.name, style: context.text.headlineSmall),
+          if ((product.code ?? '').isNotEmpty) line(Icons.qr_code_2, appTextValue('الكود', 'Code'), product.code!, ltr: true),
+          if ((product.category ?? '').isNotEmpty)
+            line(Icons.category_outlined, appTextValue('التصنيف', 'Category'), localizeCatalogValue(context, product.category!)),
+          if ((product.brand ?? '').isNotEmpty) line(Icons.business_outlined, appTextValue('العلامة', 'Brand'), product.brand!),
+          line(Icons.straighten, appTextValue('الوحدة', 'Unit'), localizeCatalogValue(context, product.unit)),
+          if ((product.notes ?? '').isNotEmpty) line(Icons.sticky_note_2_outlined, appTextValue('ملاحظات', 'Notes'), product.notes!),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Difference between the latest sale and purchase price, only when both
+/// exist in the same currency (amounts in different currencies are never
+/// compared or converted).
+class _Difference extends StatelessWidget {
+  const _Difference({required this.product});
+  final Product product;
+
+  @override
+  Widget build(BuildContext context) {
+    final buy = product.latestPurchasePrice;
+    final sell = product.latestSalePrice;
+    if (buy == null || sell == null) return const SizedBox.shrink();
+    if (product.latestPurchaseCurrency != product.latestSaleCurrency) {
+      return NoticeBanner(
+        text: appTextValue(
+          'آخر شراء وآخر بيع بعملتين مختلفتين؛ لا يُحسب الفرق بينهما.',
+          'The latest purchase and sale are in different currencies, so no difference is calculated.',
+        ),
+      );
+    }
+    final difference = sell - buy;
+    final sign = difference > 0 ? '+' : '';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(top: Space.sm),
+      child: Text(
+        appTextValue(
+          'الفرق بين آخر بيع وآخر شراء: ${ltrIsolate(sign + formatMoney(difference))} ${currencyLabel(context, product.latestSaleCurrency)} (فرق سعري، وليس ربحًا صافيًا).',
+          'Latest sale minus latest purchase: $sign${formatMoney(difference)} ${currencyLabel(context, product.latestSaleCurrency)} (a price difference, not net profit).',
+        ),
+        style: context.text.bodySmall,
+      ),
+    );
+  }
+}
+
+class _EntryTile extends StatelessWidget {
+  const _EntryTile({required this.entry, required this.purchase, required this.unit, required this.onEdit, required this.onDelete});
+
+  final PriceEntry entry;
+  final bool purchase;
+  final String unit;
+  final VoidCallback? onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final language = Localizations.localeOf(context).languageCode;
+    final details = <String>[
+      appTextValue(
+        'الكمية ${ltrIsolate(formatQuantity(entry.quantity))} ${localizeCatalogValue(context, unit)}',
+        'Qty ${formatQuantity(entry.quantity)} ${localizeCatalogValue(context, unit)}',
+      ),
+      if ((entry.partyName ?? '').isNotEmpty) entry.partyName!,
+      if ((entry.invoiceNumber ?? '').isNotEmpty) appTextValue('فاتورة ${ltrIsolate(entry.invoiceNumber!)}', 'Invoice ${entry.invoiceNumber}'),
+    ];
+    return Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(Space.lg, Space.md, Space.xs, Space.md),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 125, child: Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
-        Expanded(child: Text(value)),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text(formatDate(entry.date, language), style: context.text.titleSmall)),
+              Text(
+                formatAmount(context, entry.unitPrice, entry.currencyCode),
+                style: context.text.titleMedium?.copyWith(
+                  color: purchase ? context.palette.purchase : context.palette.sale,
+                  fontFeatures: tabularFigures,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 2),
+            Text(details.join(' · '), style: context.text.bodySmall),
+            if ((entry.notes ?? '').isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(entry.notes!, style: context.text.bodySmall),
+            ],
+          ]),
+        ),
+        PopupMenuButton<String>(
+          tooltip: appTextValue('إجراءات العملية', 'Record actions'),
+          onSelected: (value) {
+            if (value == 'edit') onEdit?.call();
+            if (value == 'delete') onDelete();
+          },
+          itemBuilder: (_) => [
+            if (onEdit != null)
+              PopupMenuItem(
+                value: 'edit',
+                child: ListTile(leading: const Icon(Icons.edit_outlined), title: Text(appTextValue('تعديل', 'Edit'))),
+              ),
+            PopupMenuItem(
+              value: 'delete',
+              child: ListTile(
+                leading: Icon(Icons.delete_outline, color: context.colors.error),
+                title: Text(appTextValue('حذف', 'Delete')),
+              ),
+            ),
+          ],
+        ),
       ]),
     );
   }
-
-  String _priceDifference(BuildContext context, Product product) {
-    if (product.latestPurchasePrice == null || product.latestSalePrice == null) return appTextValue('غير متاح لعدم اكتمال السعرين', 'Unavailable because a price is missing');
-    if ((product.latestPurchaseCurrency ?? 'YER') != (product.latestSaleCurrency ?? 'YER')) return appTextValue('لا يمكن مقارنة سعرين بعملتين مختلفتين', 'Cannot compare prices in different currencies');
-    final difference = product.latestSalePrice! - product.latestPurchasePrice!;
-    return '${difference >= 0 ? '+' : ''}${formatMoney(difference)} ${currencyLabel(context, product.latestPurchaseCurrency)}';
-  }
-}
-
-class _CurrentPrice extends StatelessWidget {
-  const _CurrentPrice({required this.label, required this.price, required this.date, required this.currency, required this.icon});
-  final String label;
-  final double? price;
-  final String? date;
-  final String currency;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(14)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [Icon(icon, size: 16), const SizedBox(width: 5), Text(label, style: const TextStyle(fontSize: 12))]),
-          const SizedBox(height: 5),
-          Text(price == null ? appTextValue('غير مسجل', 'Not recorded') : '${formatMoney(price)} ${currencyLabel(context, currency)}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-          if (date != null) Text(formatDate(date, Localizations.localeOf(context).languageCode), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-        ]),
-      );
-}
-
-class _HistorySection extends StatelessWidget {
-  const _HistorySection({required this.title, required this.icon, required this.entries, required this.isPurchase, required this.unit, required this.onEdit, required this.onDelete});
-  final String title;
-  final IconData icon;
-  final List<PriceEntry> entries;
-  final bool isPurchase;
-  final String unit;
-  final Future<void> Function(PriceEntry entry) onEdit;
-  final Future<void> Function(PriceEntry entry) onDelete;
-
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [Icon(icon, color: Theme.of(context).colorScheme.primary), const SizedBox(width: 8), Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const Spacer(), Text(appTextValue('${entries.length} عملية', '${entries.length} transactions'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant))]),
-            const SizedBox(height: 10),
-            if (entries.isEmpty)
-              Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: Text('لا توجد عمليات مسجلة بعد.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))))
-            else
-              ...entries.map((entry) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Container(width: 4, height: 54, decoration: BoxDecoration(color: isPurchase ? Colors.blue : Colors.green, borderRadius: BorderRadius.circular(4))),
-                      const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(formatDate(entry.date, Localizations.localeOf(context).languageCode), style: const TextStyle(fontWeight: FontWeight.w700)),
-                        Text(appTextValue('الكمية: ${formatMoney(entry.quantity)} $unit', 'Quantity: ${formatMoney(entry.quantity)} $unit'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if ((entry.partyName ?? '').isNotEmpty) Text(appTextValue(isPurchase ? 'المورد: ${entry.partyName}' : 'العميل: ${entry.partyName}', isPurchase ? 'Supplier: ${entry.partyName}' : 'Customer: ${entry.partyName}'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if ((entry.invoiceNumber ?? '').isNotEmpty) Text(appTextValue('الفاتورة: ${entry.invoiceNumber}', 'Invoice: ${entry.invoiceNumber}'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if ((entry.notes ?? '').isNotEmpty) Text(appTextValue('ملاحظة: ${entry.notes}', 'Note: ${entry.notes}'), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                      ])),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('${formatMoney(entry.unitPrice)} ${currencyLabel(context, entry.currencyCode)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-                          PopupMenuButton<String>(
-                            tooltip: appTextValue('إجراءات العملية', 'Transaction actions'),
-                            icon: const Icon(Icons.more_horiz),
-                            onSelected: (action) {
-                              if (action == 'edit') onEdit(entry);
-                              if (action == 'delete') onDelete(entry);
-                            },
-                            itemBuilder: (_) => [
-                              PopupMenuItem<String>(
-                                value: 'edit',
-                                child: Row(children: [
-                                  const Icon(Icons.edit_outlined, size: 20),
-                                  const SizedBox(width: 8),
-                                  Text(appTextValue('تعديل العملية', 'Edit transaction')),
-                                ]),
-                              ),
-                              PopupMenuItem<String>(
-                                value: 'delete',
-                                child: Row(children: [
-                                  Icon(Icons.delete_outline, size: 20, color: Theme.of(context).colorScheme.error),
-                                  const SizedBox(width: 8),
-                                  Text(appTextValue('حذف العملية', 'Delete transaction')),
-                                ]),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ]),
-                  )),
-          ]),
-        ),
-      );
 }

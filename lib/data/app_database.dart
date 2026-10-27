@@ -8,20 +8,29 @@ import 'package:sqflite_common/sqlite_api.dart';
 
 import '../utils/app_helpers.dart';
 import '../utils/currencies.dart';
+import '../utils/localized_message.dart';
 import 'backup_validator.dart';
 
 export 'backup_validator.dart' show BackupContents, ImportUndoResult;
 
 /// Thrown when the database file was written by a newer app version.
 /// Opening it with an older schema could silently corrupt data, so the app stops.
-class DatabaseVersionTooNewException implements Exception {
+class DatabaseVersionTooNewException implements Exception, LocalizedMessage {
   const DatabaseVersionTooNewException(this.fileVersion, this.appVersion);
   final int fileVersion;
   final int appVersion;
 
   @override
-  String toString() =>
+  String get ar =>
       'قاعدة البيانات أنشأها إصدار أحدث من التطبيق (مخطط $fileVersion، والمدعوم $appVersion). ثبّت الإصدار الأحدث؛ لم تُعدَّل البيانات.';
+
+  @override
+  String get en =>
+      'The data was created by a newer version of the app (schema $fileVersion, this version supports $appVersion). '
+      'Install the newer version; nothing was changed.';
+
+  @override
+  String toString() => ar;
 }
 
 class AppDatabase {
@@ -264,19 +273,23 @@ class AppDatabase {
 
   String _now() => DateTime.now().toIso8601String();
 
-  String _requiredText(String value, String fieldName) {
+  String _requiredName(String value) {
     final trimmed = value.trim();
-    if (trimmed.isEmpty) throw ArgumentError('$fieldName مطلوب.');
+    if (trimmed.isEmpty) throw LocalizedArgumentError('اسم الصنف مطلوب.', 'The item name is required.');
     return trimmed;
   }
 
   void _validateEntry({required String date, required double price, required double quantity}) {
     final parsedDate = DateTime.tryParse(date);
     if (parsedDate == null || toIsoDate(parsedDate) != date) {
-      throw ArgumentError('التاريخ غير صحيح؛ استخدم صيغة YYYY-MM-DD.');
+      throw LocalizedArgumentError('التاريخ غير صحيح؛ استخدم صيغة YYYY-MM-DD.', 'Invalid date; use the YYYY-MM-DD format.');
     }
-    if (!price.isFinite || price < 0) throw ArgumentError('السعر يجب ألا يكون سالبًا.');
-    if (!quantity.isFinite || quantity <= 0) throw ArgumentError('الكمية يجب أن تكون أكبر من صفر.');
+    if (!price.isFinite || price < 0) {
+      throw LocalizedArgumentError('السعر يجب ألا يكون سالبًا.', 'The price cannot be negative.');
+    }
+    if (!quantity.isFinite || quantity <= 0) {
+      throw LocalizedArgumentError('الكمية يجب أن تكون أكبر من صفر.', 'The quantity must be greater than zero.');
+    }
   }
 
   Future<int> saveProduct({
@@ -289,7 +302,7 @@ class AppDatabase {
     String? notes,
     bool isFavorite = false,
   }) async {
-    final safeName = _requiredText(name, 'اسم الصنف');
+    final safeName = _requiredName(name);
     final safeUnit = unit.trim().isEmpty ? 'قطعة' : unit.trim();
     final timestamp = _now();
     final values = <String, Object?>{
@@ -313,7 +326,9 @@ class AppDatabase {
         savedId = await txn.insert('products', values);
       } else {
         final count = await txn.update('products', values, where: 'id = ? AND is_archived = 0', whereArgs: [id]);
-        if (count == 0) throw StateError('لم يتم العثور على الصنف المطلوب لتعديله.');
+        if (count == 0) {
+          throw LocalizedStateError('لم يتم العثور على الصنف المطلوب لتعديله، أو أنه مؤرشف.', 'The item to edit was not found or is archived.');
+        }
         savedId = id;
       }
       await refreshSearchIndex(txn, productIds: [savedId]);
@@ -493,7 +508,9 @@ class AppDatabase {
 
   String _validatedCurrency(String currencyCode) {
     final code = AppCurrencies.tryParse(currencyCode);
-    if (code == null) throw ArgumentError('العملة غير مدعومة: $currencyCode');
+    if (code == null) {
+      throw LocalizedArgumentError('العملة غير مدعومة: $currencyCode', 'Unsupported currency: $currencyCode');
+    }
     return code;
   }
 
@@ -534,7 +551,7 @@ class AppDatabase {
       where: 'id = ? AND is_archived = 1',
       whereArgs: [id],
     );
-    if (count == 0) throw StateError('الصنف غير موجود أو غير مؤرشف.');
+    if (count == 0) throw LocalizedStateError('الصنف غير موجود أو غير مؤرشف.', 'The item does not exist or is not archived.');
   }
 
   Future<int> recordPurchase({
@@ -654,7 +671,7 @@ class AppDatabase {
         whereArgs: [id, productId],
       );
       if (count == 0) {
-        throw StateError('لم يتم العثور على العملية المطلوبة لتعديلها.');
+        throw LocalizedStateError('لم يتم العثور على العملية المطلوبة لتعديلها.', 'The transaction to edit was not found.');
       }
       await refreshSearchIndex(txn, productIds: [productId]);
     });
@@ -676,7 +693,7 @@ class AppDatabase {
         whereArgs: [id, productId],
       );
       if (count == 0) {
-        throw StateError('لم يتم العثور على العملية المطلوبة لحذفها.');
+        throw LocalizedStateError('لم يتم العثور على العملية المطلوبة لحذفها.', 'The transaction to delete was not found.');
       }
       await refreshSearchIndex(txn, productIds: [productId]);
     });
@@ -696,7 +713,12 @@ class AppDatabase {
         whereArgs: [productId],
         limit: 1,
       );
-      if (product.isEmpty) throw StateError('الصنف غير موجود أو مؤرشف.');
+      if (product.isEmpty) {
+        throw LocalizedStateError(
+          'الصنف غير موجود أو مؤرشف. ألغِ أرشفته أولًا لإضافة عمليات.',
+          'The item does not exist or is archived. Restore it from the archive to add transactions.',
+        );
+      }
       final entryId = await txn.insert(table, values);
       await refreshSearchIndex(txn, productIds: [productId]);
       return entryId;
@@ -828,9 +850,11 @@ class AppDatabase {
     final db = await database;
     return db.transaction((txn) async {
       final batches = await txn.query('import_batches', where: 'id = ?', whereArgs: [batchId], limit: 1);
-      if (batches.isEmpty) throw StateError('دفعة الاستيراد غير موجودة.');
+      if (batches.isEmpty) throw LocalizedStateError('دفعة الاستيراد غير موجودة.', 'The import batch was not found.');
       final batch = batches.single;
-      if (batch['undone_at'] != null) throw StateError('تم التراجع عن هذه الدفعة سابقًا.');
+      if (batch['undone_at'] != null) {
+        throw LocalizedStateError('تم التراجع عن هذه الدفعة سابقًا.', 'This import was already undone.');
+      }
 
       final touched = (await txn.rawQuery(
         'SELECT product_id FROM purchase_entries WHERE import_batch_id = ? '

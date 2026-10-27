@@ -47,7 +47,7 @@ void main() {
 
     test('reports month/day/year dates instead of guessing', () async {
       final p = await preview('$header${purchase('صنف', date: '04/25/2026')}');
-      expect(p.rejectedRows.single.errors.single, contains('شهر/يوم/سنة'));
+      expect(p.rejectedRows.single.errors.single.ar, contains('شهر/يوم/سنة'));
     });
 
     test('warns when every slash date is ambiguous', () async {
@@ -121,7 +121,7 @@ void main() {
       final p = await preview('$header${purchase('كابل 2 خط 4 ملم', unit: 'متر')}${purchase('كابل 4 خط 2 ملم', unit: 'متر')}');
       expect(p.groups, hasLength(2));
       expect(p.groups.every((g) => g.status == ImportGroupStatus.newProduct), isTrue);
-      expect(p.groups.every((g) => g.notices.any((n) => n.contains('متشابهة'))), isTrue);
+      expect(p.groups.every((g) => g.notices.any((n) => n.ar.contains('متشابهة'))), isTrue);
       final result = await importAll(p);
       expect(result.productsAdded, 2);
     });
@@ -262,7 +262,7 @@ void main() {
       final id = await db.saveProduct(name: 'صنف بيع', unit: 'قطعة');
       final p = await preview('${header}SALE,صنف بيع,قطعة,,,,,2026-10-13,2100,YER,1,عميل,20,ملاحظة,0,0,\n');
       expect(p.rows.single.invoice, isNull);
-      expect(p.rows.single.warnings.any((w) => w.contains('تجاهل') || w.contains('سيُتجاهل')), isTrue);
+      expect(p.rows.single.warnings.any((w) => w.ar.contains('سيُتجاهل')), isTrue);
       final result = await importAll(p);
       expect(result.transactionsAdded, 1);
       expect(await db.getSaleHistory(id), hasLength(1));
