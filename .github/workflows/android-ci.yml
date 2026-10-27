@@ -16,16 +16,18 @@ concurrency:
 
 jobs:
   verify-and-build:
-    name: Analyze, test, and build APK
+    name: Analyze, test, and build APK and AAB
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        # Actions are pinned to full commit SHAs (tag in the comment) so a moved
+        # tag cannot change what runs with the signing secrets.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install Flutter stable
-        uses: flutter-actions/setup-flutter@v4
+        uses: flutter-actions/setup-flutter@adb607ae976a9e00473569facfc69813c637a060 # v4.3
         with:
           channel: stable
           version: 3.47.5
@@ -168,10 +170,60 @@ jobs:
       - name: Build release-mode APK
         run: flutter build apk --release
 
-      - name: Verify APK artifact exists
-        run: test -s build/app/outputs/flutter-apk/app-release.apk
+      - name: Build release-mode Android App Bundle (for Google Play)
+        run: flutter build appbundle --release
 
-      - name: Verify APK signature matches release keystore
+      - name: Verify build outputs exist
+        run: |
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          test -s build/app/outputs/bundle/release/app-release.aab
+
+      - name: Check identity, version and SDK levels in the APK manifest
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/aapt2" dump badging build/app/outputs/flutter-apk/app-release.apk > badging.txt
+          grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission|application-label|application-icon-160|application:)" badging.txt
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          badging = Path("badging.txt").read_text(encoding="utf-8")
+          pubspec = Path("pubspec.yaml").read_text(encoding="utf-8")
+          name, code = re.search(r"(?m)^version:\s*([^+\s]+)\+(\d+)\s*$", pubspec).groups()
+          expected = {
+              "package": "name='com.abnalhag.gimi.buy_price_assistant_gimi'",
+              "versionCode": f"versionCode='{code}'",
+              "versionName": f"versionName='{name}'",
+              "sdkVersion": "sdkVersion:'24'",
+              "targetSdkVersion": "targetSdkVersion:'36'",
+          }
+          missing = [key for key, text in expected.items() if text not in badging]
+          if missing:
+              raise SystemExit(f"Unexpected manifest values: {missing}")
+          storage = [p for p in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE") if p in badging]
+          if storage:
+              raise SystemExit(f"Unexpected storage permissions: {storage}")
+          print("Package, version, SDK levels and permissions are as expected.")
+          PY
+
+      - name: Check 16 KB page alignment of native libraries
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK" | tail -n 3
+          LIBS="$RUNNER_TEMP/apk-libs"
+          rm -rf "$LIBS" && mkdir -p "$LIBS"
+          unzip -q "$APK" 'lib/arm64-v8a/*.so' 'lib/x86_64/*.so' -d "$LIBS" || true
+          status=0
+          for so in $(find "$LIBS" -name '*.so'); do
+            align="$(readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }' | sort -u | head -n 1)"
+            echo "$(basename "$so") LOAD alignment $align"
+            if [ $(( align )) -lt $(( 0x4000 )) ]; then status=1; fi
+          done
+          exit $status
+
+      - name: Verify APK and AAB signatures match release keystore
         if: github.event_name != 'pull_request'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -179,6 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
+          AAB="build/app/outputs/bundle/release/app-release.aab"
           KEYSTORE="$RUNNER_TEMP/gimi-release.jks"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           APKSIGNER="$BUILD_TOOLS/apksigner"
@@ -189,8 +242,12 @@ jobs:
             | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           APK_SHA="$("$APKSIGNER" verify --print-certs "$APK" \
             | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          # An AAB is signed with jarsigner (JAR signing), not APK Signature Scheme.
+          jarsigner -verify "$AAB" | tail -n 1
+          AAB_SHA="$(keytool -printcert -jarfile "$AAB" \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
 
-          if [ -z "$KEY_SHA" ] || [ -z "$APK_SHA" ]; then
+          if [ -z "$KEY_SHA" ] || [ -z "$APK_SHA" ] || [ -z "$AAB_SHA" ]; then
             echo "::error::Could not read SHA-256 certificate fingerprint."
             exit 1
           fi
@@ -198,28 +255,33 @@ jobs:
             echo "::error::APK certificate does not match the configured release keystore."
             exit 1
           fi
+          if [ "$KEY_SHA" != "$AAB_SHA" ]; then
+            echo "::error::AAB certificate does not match the configured release keystore."
+            exit 1
+          fi
           "$APKSIGNER" verify --verbose "$APK"
-          echo "APK signature verified against the configured release keystore."
+          echo "APK and AAB are signed with the configured release key."
 
       - name: Remove temporary signing files
         if: always()
         run: |
           rm -f android/key.properties "$RUNNER_TEMP/gimi-release.jks"
 
-      # Pull-request builds intentionally skip release signing. Do not publish their APK as an installable update.
+      # Pull-request builds intentionally skip release signing. Do not publish their outputs as an installable update.
       - name: Upload signed release APK artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: buy-price-assistant-gimi-signed-release-apk-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload resolved dependency lockfile
-        uses: actions/upload-artifact@v4
+      - name: Upload signed Android App Bundle artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: resolved-pubspec-lock-${{ github.run_number }}
-          path: pubspec.lock
+          name: buy-price-assistant-gimi-signed-release-aab-${{ github.run_number }}
+          path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
