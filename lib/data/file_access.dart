@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -19,35 +18,36 @@ class FileAccess {
 
   static FileAccess instance = const FileAccess();
 
+  static const Map<String, String> _mimeTypes = <String, String>{
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'csv': 'text/csv',
+    'json': 'application/json',
+  };
+
   /// Returns null when the user cancels. Files larger than [maxBytes] are
-  /// refused before they are read into memory.
+  /// refused before they are read into memory when the size is known.
   Future<PickedFile?> pickFile({required List<String> extensions, required int maxBytes, String? dialogTitle}) async {
-    final result = await FilePicker.platform.pickFiles(
+    final file = await FilePicker.pickFile(
       dialogTitle: dialogTitle,
       type: FileType.custom,
       allowedExtensions: extensions,
-      allowMultiple: false,
-      withData: false,
-      withReadStream: false,
     );
-    if (result == null || result.files.isEmpty) return null;
-    final file = result.files.single;
-    if (file.size > maxBytes) {
-      final megabytes = (maxBytes / (1024 * 1024)).round();
-      throw LocalizedFormatException(
-        'حجم الملف أكبر من $megabytes ميغابايت.',
-        'The file is larger than $megabytes MB.',
-      );
-    }
+    if (file == null) return null;
+    final size = file.lengthSync() ?? await file.length();
+    if (size != null && size > maxBytes) throw _tooLarge(maxBytes);
     final Uint8List bytes;
-    if (file.bytes != null) {
-      bytes = file.bytes!;
-    } else if (file.path != null) {
-      bytes = await File(file.path!).readAsBytes();
-    } else {
+    try {
+      bytes = await file.readAsBytes();
+    } on Exception {
       throw const LocalizedFormatException('تعذر قراءة الملف المختار.', 'The selected file could not be read.');
     }
+    if (bytes.length > maxBytes) throw _tooLarge(maxBytes);
     return PickedFile(name: file.name, bytes: bytes);
+  }
+
+  LocalizedFormatException _tooLarge(int maxBytes) {
+    final megabytes = (maxBytes / (1024 * 1024)).round();
+    return LocalizedFormatException('حجم الملف أكبر من $megabytes ميغابايت.', 'The file is larger than $megabytes MB.');
   }
 
   /// Asks the user where to save [bytes]. Returns false when cancelled.
@@ -57,14 +57,13 @@ class FileAccess {
     required String extension,
     String? dialogTitle,
   }) async {
-    final path = await FilePicker.platform.saveFile(
+    final uri = await FilePicker.saveFile(
       dialogTitle: dialogTitle,
       fileName: fileName,
-      type: FileType.custom,
-      allowedExtensions: [extension],
       bytes: bytes,
+      mimeType: _mimeTypes[extension] ?? 'application/octet-stream',
     );
-    return path != null;
+    return uri != null;
   }
 }
 
