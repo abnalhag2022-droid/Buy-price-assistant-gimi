@@ -884,6 +884,7 @@ class SpreadsheetExchange {
         }
         written++;
       }
+      await AppDatabase.refreshSearchIndex(txn, productIds: productIds.values);
       await txn.update('import_batches', {
         'products_added': productsAdded,
         'entries_added': written,

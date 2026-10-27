@@ -137,6 +137,9 @@ void main() {
       // Search columns are recomputed, so Latin and Arabic-Indic digits both find it.
       expect(await upgraded.searchProducts('غطاس 55'), hasLength(1));
       expect(await upgraded.searchProducts('٥٥'), hasLength(1));
+      // The v5 search index is built from the existing purchase and sale records.
+      expect(await upgraded.searchProducts('مورد سابق'), hasLength(1));
+      expect(await upgraded.searchProducts('عميل سابق 2026-01-03'), hasLength(1));
 
       // The upgraded database has every column and index a fresh install has.
       final freshDir = await Directory.systemTemp.createTemp('gimi_fresh_');
@@ -156,10 +159,16 @@ void main() {
     // Older releases have no onDowngrade: sqflite silently writes their version.
     final raw = await databaseFactoryFfi.openDatabase(path);
     await raw.setVersion(3);
+    // The older app writes a record without knowing about the search index.
+    await raw.insert('purchase_entries', {
+      'product_id': 1, 'purchase_date': '2026-02-02', 'unit_price': 310.0, 'currency_code': 'SAR',
+      'quantity': 1.0, 'supplier': 'مورد الإصدار القديم', 'created_at': '2026-02-02T00:00:00',
+    });
     await raw.close();
 
     final again = app();
-    expect(await again.getPurchaseHistory(1), hasLength(2));
+    expect(await again.getPurchaseHistory(1), hasLength(3));
+    expect(await again.searchProducts('القديم'), hasLength(1), reason: 'the index is rebuilt on upgrade');
     final columns = await columnsOf(await again.database);
     expect(columns['purchase_entries']!.where((c) => c == 'import_batch_id'), hasLength(1));
   });

@@ -43,9 +43,10 @@ class AppDatabase {
 
   /// Schema history:
   /// 1 = initial; 2 = currency per entry; 3 = digit-normalized search columns;
-  /// 4 = import batches (import_batch_id + import_batches table).
+  /// 4 = import batches (import_batch_id + import_batches table);
+  /// 5 = precomputed search index (products.search_text, products.search_notes).
   /// Never redefine a released version: add a new one instead.
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
 
   final DatabaseFactory _factory;
   final Future<String> Function() _databasePathProvider;
@@ -86,9 +87,14 @@ class AppDatabase {
       await _addColumnIfMissing(db, 'sale_entries', 'import_batch_id', 'TEXT');
       await _createImportBatchObjects(db);
     }
-    // Search columns depend on normalizeForSearch, which changed in v3.
-    // Recomputing them is cheap and keeps every upgraded install consistent.
-    await _recomputeProductSearchColumns(db);
+    if (oldVersion < 5) {
+      await _addColumnIfMissing(db, 'products', 'search_text', "TEXT NOT NULL DEFAULT ''");
+      await _addColumnIfMissing(db, 'products', 'search_notes', "TEXT NOT NULL DEFAULT ''");
+    }
+    // Search columns depend on normalizeForSearch (changed in v3) and an older
+    // app may have written entries without updating the index, so the whole
+    // index is rebuilt on every upgrade.
+    await refreshSearchIndex(db);
   }
 
   Future<void> _addColumnIfMissing(DatabaseExecutor db, String table, String column, String definition) async {
@@ -114,15 +120,86 @@ class AppDatabase {
     await db.execute('CREATE INDEX IF NOT EXISTS idx_products_import_batch ON products(import_batch_id)');
   }
 
-  Future<void> _recomputeProductSearchColumns(DatabaseExecutor db) async {
-    final products = await db.query('products', columns: ['id', 'name', 'code', 'category']);
-    for (final product in products) {
-      await db.update('products', {
-        'search_name': normalizeForSearch(product['name'] as String? ?? ''),
-        'search_code': normalizeForSearch(product['code'] as String? ?? ''),
-        'search_category': normalizeForSearch(product['category'] as String? ?? ''),
-      }, where: 'id = ?', whereArgs: [product['id']]);
+  /// Rebuilds the normalized search columns of the given products (all
+  /// products when [productIds] is null). Must run in the same transaction as
+  /// the write that changed a product or one of its entries.
+  ///
+  /// `search_text` holds every field search covers: name, code, category,
+  /// brand, notes, and each entry's supplier/customer, notes, date and unit
+  /// price. `search_notes` holds the product and entry notes only, to tell the
+  /// user that a result matched through a note. Fields are separated by a line
+  /// break; search terms never contain one, so a term cannot match across two
+  /// fields.
+  static Future<void> refreshSearchIndex(DatabaseExecutor db, {Iterable<int>? productIds}) async {
+    if (productIds == null) {
+      await _refreshSearchIndexChunk(db, null);
+      return;
     }
+    final ids = productIds.toSet().toList();
+    // Android 7 ships SQLite 3.9, which allows at most 999 bound variables.
+    for (var start = 0; start < ids.length; start += 500) {
+      await _refreshSearchIndexChunk(db, ids.sublist(start, min(start + 500, ids.length)));
+    }
+  }
+
+  static Future<void> _refreshSearchIndexChunk(DatabaseExecutor db, List<int>? ids) async {
+    final placeholders = ids == null ? '' : List.filled(ids.length, '?').join(', ');
+    final products = await db.query(
+      'products',
+      columns: ['id', 'name', 'code', 'category', 'brand', 'notes'],
+      where: ids == null ? null : 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
+    if (products.isEmpty) return;
+    final text = <int, List<String>>{};
+    final notes = <int, List<String>>{};
+    void add(Map<int, List<String>> target, int id, Object? value) {
+      final normalized = value == null ? '' : normalizeForSearch(value.toString());
+      if (normalized.isNotEmpty) target[id]?.add(normalized);
+    }
+
+    for (final row in products) {
+      final id = row['id']! as int;
+      text[id] = <String>[];
+      notes[id] = <String>[];
+      for (final column in ['name', 'code', 'category', 'brand', 'notes']) {
+        add(text, id, row[column]);
+      }
+      add(notes, id, row['notes']);
+    }
+    final entryWhere = ids == null ? '' : ' WHERE product_id IN ($placeholders)';
+    const entryQueries = <String>[
+      'SELECT product_id, supplier AS party, notes, purchase_date AS entry_date, unit_price FROM purchase_entries',
+      'SELECT product_id, customer AS party, notes, sale_date AS entry_date, unit_price FROM sale_entries',
+    ];
+    for (final sql in entryQueries) {
+      for (final row in await db.rawQuery('$sql$entryWhere', ids ?? const <Object?>[])) {
+        final id = row['product_id']! as int;
+        add(text, id, row['party']);
+        add(text, id, row['notes']);
+        add(text, id, row['entry_date']);
+        // Same text SQLite's CAST(unit_price AS TEXT) gives, e.g. "275.0".
+        add(text, id, (row['unit_price'] as num?)?.toDouble());
+        add(notes, id, row['notes']);
+      }
+    }
+    final batch = db.batch();
+    for (final row in products) {
+      final id = row['id']! as int;
+      batch.update(
+        'products',
+        <String, Object?>{
+          'search_name': normalizeForSearch(row['name'] as String? ?? ''),
+          'search_code': normalizeForSearch(row['code'] as String? ?? ''),
+          'search_category': normalizeForSearch(row['category'] as String? ?? ''),
+          'search_text': text[id]!.join('\n'),
+          'search_notes': notes[id]!.join('\n'),
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+    await batch.commit(noResult: true);
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -142,7 +219,9 @@ class AppDatabase {
         is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        import_batch_id TEXT
+        import_batch_id TEXT,
+        search_text TEXT NOT NULL DEFAULT '',
+        search_notes TEXT NOT NULL DEFAULT ''
       )
     ''');
     await db.execute('''
@@ -227,13 +306,19 @@ class AppDatabase {
       'updated_at': timestamp,
     };
     final db = await database;
-    if (id == null) {
-      values['created_at'] = timestamp;
-      return db.insert('products', values);
-    }
-    final count = await db.update('products', values, where: 'id = ? AND is_archived = 0', whereArgs: [id]);
-    if (count == 0) throw StateError('لم يتم العثور على الصنف المطلوب لتعديله.');
-    return id;
+    return db.transaction((txn) async {
+      final int savedId;
+      if (id == null) {
+        values['created_at'] = timestamp;
+        savedId = await txn.insert('products', values);
+      } else {
+        final count = await txn.update('products', values, where: 'id = ? AND is_archived = 0', whereArgs: [id]);
+        if (count == 0) throw StateError('لم يتم العثور على الصنف المطلوب لتعديله.');
+        savedId = id;
+      }
+      await refreshSearchIndex(txn, productIds: [savedId]);
+      return savedId;
+    });
   }
 
   String? _nullableTrim(String? value) {
@@ -241,102 +326,120 @@ class AppDatabase {
     return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
   }
 
-  String _productSelect() => '''
-    SELECT p.*,
-      (SELECT pe.unit_price FROM purchase_entries pe WHERE pe.product_id = p.id
-       ORDER BY pe.purchase_date DESC, pe.id DESC LIMIT 1) AS latest_purchase_price,
-      (SELECT pe.purchase_date FROM purchase_entries pe WHERE pe.product_id = p.id
-       ORDER BY pe.purchase_date DESC, pe.id DESC LIMIT 1) AS latest_purchase_date,
-      (SELECT pe.currency_code FROM purchase_entries pe WHERE pe.product_id = p.id
-       ORDER BY pe.purchase_date DESC, pe.id DESC LIMIT 1) AS latest_purchase_currency,
-      (SELECT COUNT(*) FROM purchase_entries pe WHERE pe.product_id = p.id) AS purchase_count,
-      (SELECT se.unit_price FROM sale_entries se WHERE se.product_id = p.id
-       ORDER BY se.sale_date DESC, se.id DESC LIMIT 1) AS latest_sale_price,
-      (SELECT se.sale_date FROM sale_entries se WHERE se.product_id = p.id
-       ORDER BY se.sale_date DESC, se.id DESC LIMIT 1) AS latest_sale_date,
-      (SELECT se.currency_code FROM sale_entries se WHERE se.product_id = p.id
-       ORDER BY se.sale_date DESC, se.id DESC LIMIT 1) AS latest_sale_currency,
-      (SELECT COUNT(*) FROM sale_entries se WHERE se.product_id = p.id) AS sale_count
-    FROM products p
+  /// Product columns returned to screens (the search index is left out).
+  static const List<String> _productColumns = <String>[
+    'id', 'name', 'code', 'category', 'unit', 'brand', 'notes', 'is_favorite',
+    'is_archived', 'created_at', 'updated_at', 'import_batch_id',
+  ];
+
+  static const String _productOrder =
+      'p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC, p.id ASC';
+
+  /// Wraps a query returning product ids ([pageSql]) with each product's
+  /// latest purchase and sale (price, date, currency, quantity, party) and
+  /// entry counts. The latest entries are found through the
+  /// (product_id, date DESC, id DESC) indexes, only for the rows of the page.
+  String _productQuery(String pageSql, {String extraColumns = ''}) => '''
+    SELECT ${_productColumns.map((c) => 'p.$c').join(', ')},
+      lp.unit_price AS latest_purchase_price, lp.purchase_date AS latest_purchase_date,
+      lp.currency_code AS latest_purchase_currency, lp.quantity AS latest_purchase_quantity,
+      lp.supplier AS latest_purchase_supplier,
+      ls.unit_price AS latest_sale_price, ls.sale_date AS latest_sale_date,
+      ls.currency_code AS latest_sale_currency, ls.quantity AS latest_sale_quantity,
+      ls.customer AS latest_sale_customer,
+      (SELECT COUNT(*) FROM purchase_entries c WHERE c.product_id = p.id) AS purchase_count,
+      (SELECT COUNT(*) FROM sale_entries c WHERE c.product_id = p.id) AS sale_count$extraColumns
+    FROM ($pageSql) page
+    JOIN products p ON p.id = page.id
+    LEFT JOIN purchase_entries lp ON lp.id = (
+      SELECT pe.id FROM purchase_entries pe WHERE pe.product_id = p.id
+      ORDER BY pe.purchase_date DESC, pe.id DESC LIMIT 1)
+    LEFT JOIN sale_entries ls ON ls.id = (
+      SELECT se.id FROM sale_entries se WHERE se.product_id = p.id
+      ORDER BY se.sale_date DESC, se.id DESC LIMIT 1)
+    ORDER BY $_productOrder
   ''';
 
-  String _sqlNormalizeDigits(String expression) {
-    const arabic = '٠١٢٣٤٥٦٧٨٩';
-    const persian = '۰۱۲۳۴۵۶۷۸۹';
-    var sql = expression;
-    for (var i = 0; i < 10; i++) {
-      sql = "replace($sql, '${arabic[i]}', '$i')";
-      sql = "replace($sql, '${persian[i]}', '$i')";
-    }
-    return sql;
-  }
+  List<String> _searchTerms(String query) =>
+      normalizeForSearch(query).split(' ').where((term) => term.isNotEmpty).toList();
 
-  Future<List<Map<String, Object?>>> searchProducts(
-    String query, {
+  /// WHERE clause shared by [searchProducts] and [countProducts].
+  ({String sql, List<Object?> args}) _searchFilter(
+    List<String> terms, {
     String? category,
     String? brand,
     String? supplier,
-  }) async {
-    final db = await database;
-    final normalized = normalizeForSearch(query);
-    final terms = normalized.split(RegExp(r'\s+')).where((v) => v.isNotEmpty).toList();
-    final args = <Object?>[];
-    final conditions = <String>['p.is_archived = 0'];
+    required bool archived,
+  }) {
+    final conditions = <String>['p.is_archived = ?'];
+    final args = <Object?>[archived ? 1 : 0];
     for (final term in terms) {
-      final termPattern = '%${escapeLikePattern(term)}%';
-      conditions.add('''(
-        p.search_name LIKE ? ESCAPE '!' OR p.search_code LIKE ? ESCAPE '!' OR
-        p.search_category LIKE ? ESCAPE '!' OR ${_sqlNormalizeDigits("lower(coalesce(p.brand, ''))")} LIKE ? ESCAPE '!' OR
-        ${_sqlNormalizeDigits("lower(coalesce(p.notes, ''))")} LIKE ? ESCAPE '!' OR
-        EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND (
-          ${_sqlNormalizeDigits("lower(coalesce(pe.supplier, ''))")} LIKE ? ESCAPE '!' OR
-          ${_sqlNormalizeDigits("lower(coalesce(pe.notes, ''))")} LIKE ? ESCAPE '!' OR
-          coalesce(pe.purchase_date, '') LIKE ? ESCAPE '!' OR cast(pe.unit_price as text) LIKE ? ESCAPE '!')) OR
-        EXISTS (SELECT 1 FROM sale_entries se WHERE se.product_id = p.id AND (
-          ${_sqlNormalizeDigits("lower(coalesce(se.customer, ''))")} LIKE ? ESCAPE '!' OR
-          ${_sqlNormalizeDigits("lower(coalesce(se.notes, ''))")} LIKE ? ESCAPE '!' OR
-          coalesce(se.sale_date, '') LIKE ? ESCAPE '!' OR cast(se.unit_price as text) LIKE ? ESCAPE '!'))
-      )''');
-      args.addAll(List<Object?>.filled(5, termPattern));
-      args.addAll(List<Object?>.filled(4, termPattern));
-      args.addAll(List<Object?>.filled(4, termPattern));
+      conditions.add("p.search_text LIKE ? ESCAPE '!'");
+      args.add('%${escapeLikePattern(term)}%');
     }
     if (category != null && category.isNotEmpty) {
       conditions.add('p.search_category = ?');
       args.add(normalizeForSearch(category));
     }
     if (brand != null && brand.isNotEmpty) {
-      conditions.add('lower(coalesce(p.brand, "")) = lower(?)');
+      conditions.add("lower(coalesce(p.brand, '')) = lower(?)");
       args.add(brand);
     }
     if (supplier != null && supplier.isNotEmpty) {
-      conditions.add("EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND lower(coalesce(pe.supplier, '')) = lower(?))");
+      conditions.add(
+        "EXISTS (SELECT 1 FROM purchase_entries pe WHERE pe.product_id = p.id AND lower(coalesce(pe.supplier, '')) = lower(?))",
+      );
       args.add(supplier);
     }
-    final noteChecks = <String>[];
-    final noteArgs = <Object?>[];
-    for (final term in terms) {
-      final notePattern = '%${escapeLikePattern(term)}%';
-      noteChecks.add('''(
-        ${_sqlNormalizeDigits("lower(coalesce(p.notes, ''))")} LIKE ? ESCAPE '!' OR
-        EXISTS (SELECT 1 FROM purchase_entries pn WHERE pn.product_id = p.id AND
-          ${_sqlNormalizeDigits("lower(coalesce(pn.notes, ''))")} LIKE ? ESCAPE '!') OR
-        EXISTS (SELECT 1 FROM sale_entries sn WHERE sn.product_id = p.id AND
-          ${_sqlNormalizeDigits("lower(coalesce(sn.notes, ''))")} LIKE ? ESCAPE '!')
-      )''');
-      noteArgs.addAll(List<Object?>.filled(3, notePattern));
-    }
-    final noteSelect = noteChecks.isEmpty
-        ? '0 AS search_match_notes'
-        : 'CASE WHEN ${noteChecks.join(' OR ')} THEN 1 ELSE 0 END AS search_match_notes';
-    final select = _productSelect().replaceFirst(
-      'FROM products p',
-      ', $noteSelect FROM products p',
-    );
+    return (sql: conditions.join(' AND '), args: args);
+  }
+
+  /// Products whose indexed text contains every word of [query]: name, code,
+  /// category, brand, notes, suppliers, customers, entry notes, entry dates
+  /// and unit prices. Arabic spelling variants and Arabic-Indic digits are
+  /// normalized; `%` and `_` are matched literally. Results are ordered
+  /// favorites first, then most recently updated, and paged with [limit] and
+  /// [offset]. `search_match_notes` is 1 when a word matched a note.
+  Future<List<Map<String, Object?>>> searchProducts(
+    String query, {
+    String? category,
+    String? brand,
+    String? supplier,
+    bool archived = false,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final db = await database;
+    final terms = _searchTerms(query);
+    final filter = _searchFilter(terms, category: category, brand: brand, supplier: supplier, archived: archived);
+    final noteColumn = terms.isEmpty
+        ? ',\n      0 AS search_match_notes'
+        : ",\n      CASE WHEN ${List.filled(terms.length, "p.search_notes LIKE ? ESCAPE '!'").join(' OR ')} "
+            'THEN 1 ELSE 0 END AS search_match_notes';
+    final pageSql = 'SELECT p.id FROM products p WHERE ${filter.sql} ORDER BY $_productOrder LIMIT ? OFFSET ?';
     return db.rawQuery(
-      '$select WHERE ${conditions.join(' AND ')} ORDER BY p.is_favorite DESC, p.updated_at DESC, p.name COLLATE NOCASE ASC LIMIT 250',
-      [...noteArgs, ...args],
+      _productQuery(pageSql, extraColumns: noteColumn),
+      <Object?>[
+        for (final term in terms) '%${escapeLikePattern(term)}%',
+        ...filter.args,
+        limit.clamp(1, 1000),
+        max(0, offset),
+      ],
     );
+  }
+
+  /// Number of products [searchProducts] can return for the same filters.
+  Future<int> countProducts(
+    String query, {
+    String? category,
+    String? brand,
+    String? supplier,
+    bool archived = false,
+  }) async {
+    final db = await database;
+    final filter = _searchFilter(_searchTerms(query), category: category, brand: brand, supplier: supplier, archived: archived);
+    final rows = await db.rawQuery('SELECT COUNT(*) AS total FROM products p WHERE ${filter.sql}', filter.args);
+    return (rows.single['total']! as num).toInt();
   }
 
   Future<List<String>> getDistinctBrands() async {
@@ -365,13 +468,13 @@ class AppDatabase {
     if (normalized.length < 2) return <Map<String, Object?>>[];
     final db = await database;
     final pattern = '%${escapeLikePattern(normalized)}%';
+    // sqflite rejects null arguments, so the exclusion is only added when set.
     return db.rawQuery(
       '''SELECT id, name, category, unit, brand, is_archived, search_name, updated_at
-         FROM products WHERE search_name LIKE ? ESCAPE '!'
-           AND (? IS NULL OR id != ?)
+         FROM products WHERE search_name LIKE ? ESCAPE '!'${excludeId == null ? '' : ' AND id != ?'}
          ORDER BY CASE WHEN search_name = ? THEN 0 ELSE 1 END, is_archived ASC,
                   updated_at DESC, name COLLATE NOCASE ASC LIMIT ?''',
-      [pattern, excludeId, excludeId, normalized, limit.clamp(1, 50)],
+      [pattern, ?excludeId, normalized, limit.clamp(1, 50)],
     );
   }
 
@@ -381,8 +484,8 @@ class AppDatabase {
     final db = await database;
     final rows = await db.query(
       'products', columns: ['id', 'name', 'category', 'unit', 'is_archived'],
-      where: 'search_name = ? AND (? IS NULL OR id != ?)',
-      whereArgs: [normalized, excludeId, excludeId],
+      where: excludeId == null ? 'search_name = ?' : 'search_name = ? AND id != ?',
+      whereArgs: [normalized, ?excludeId],
       orderBy: 'is_archived ASC, updated_at DESC', limit: 1,
     );
     return rows.isEmpty ? null : rows.first;
@@ -396,15 +499,17 @@ class AppDatabase {
 
   Future<Map<String, Object?>?> getProduct(int id) async {
     final db = await database;
-    final result = await db.rawQuery('${_productSelect()} WHERE p.id = ? LIMIT 1', [id]);
+    final result = await db.rawQuery(_productQuery('SELECT id FROM products WHERE id = ?'), [id]);
     return result.isEmpty ? null : result.first;
   }
 
+  /// Marking a favorite is a display preference, not an edit, so it keeps
+  /// updated_at (and the product's place among the other favorites).
   Future<void> setFavorite(int id, bool favorite) async {
     final db = await database;
     await db.update(
       'products',
-      {'is_favorite': favorite ? 1 : 0, 'updated_at': _now()},
+      {'is_favorite': favorite ? 1 : 0},
       where: 'id = ? AND is_archived = 0',
       whereArgs: [id],
     );
@@ -418,6 +523,18 @@ class AppDatabase {
       where: 'id = ? AND is_archived = 0',
       whereArgs: [id],
     );
+  }
+
+  /// Brings an archived product back to the main list with its full history.
+  Future<void> unarchiveProduct(int id) async {
+    final db = await database;
+    final count = await db.update(
+      'products',
+      {'is_archived': 0, 'updated_at': _now()},
+      where: 'id = ? AND is_archived = 1',
+      whereArgs: [id],
+    );
+    if (count == 0) throw StateError('الصنف غير موجود أو غير مؤرشف.');
   }
 
   Future<int> recordPurchase({
@@ -529,15 +646,18 @@ class AppDatabase {
       throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');
     }
     final db = await database;
-    final count = await db.update(
-      table,
-      values,
-      where: 'id = ? AND product_id = ?',
-      whereArgs: [id, productId],
-    );
-    if (count == 0) {
-      throw StateError('لم يتم العثور على العملية المطلوبة لتعديلها.');
-    }
+    await db.transaction((txn) async {
+      final count = await txn.update(
+        table,
+        values,
+        where: 'id = ? AND product_id = ?',
+        whereArgs: [id, productId],
+      );
+      if (count == 0) {
+        throw StateError('لم يتم العثور على العملية المطلوبة لتعديلها.');
+      }
+      await refreshSearchIndex(txn, productIds: [productId]);
+    });
   }
 
   Future<void> _deleteHistoryEntry(
@@ -549,14 +669,17 @@ class AppDatabase {
       throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');
     }
     final db = await database;
-    final count = await db.delete(
-      table,
-      where: 'id = ? AND product_id = ?',
-      whereArgs: [id, productId],
-    );
-    if (count == 0) {
-      throw StateError('لم يتم العثور على العملية المطلوبة لحذفها.');
-    }
+    await db.transaction((txn) async {
+      final count = await txn.delete(
+        table,
+        where: 'id = ? AND product_id = ?',
+        whereArgs: [id, productId],
+      );
+      if (count == 0) {
+        throw StateError('لم يتم العثور على العملية المطلوبة لحذفها.');
+      }
+      await refreshSearchIndex(txn, productIds: [productId]);
+    });
   }
 
   Future<int> _recordEntry(String table, Map<String, Object?> values) async {
@@ -564,35 +687,42 @@ class AppDatabase {
       throw ArgumentError.value(table, 'table', 'جدول غير مسموح.');
     }
     final db = await database;
-    final product = await db.query(
-      'products',
-      columns: ['id'],
-      where: 'id = ? AND is_archived = 0',
-      whereArgs: [values['product_id']],
-      limit: 1,
-    );
-    if (product.isEmpty) throw StateError('الصنف غير موجود أو مؤرشف.');
-    return db.insert(table, values);
+    return db.transaction((txn) async {
+      final productId = values['product_id']! as int;
+      final product = await txn.query(
+        'products',
+        columns: ['id'],
+        where: 'id = ? AND is_archived = 0',
+        whereArgs: [productId],
+        limit: 1,
+      );
+      if (product.isEmpty) throw StateError('الصنف غير موجود أو مؤرشف.');
+      final entryId = await txn.insert(table, values);
+      await refreshSearchIndex(txn, productIds: [productId]);
+      return entryId;
+    });
   }
 
-  Future<List<Map<String, Object?>>> getPurchaseHistory(int productId) async {
+  /// Newest first. Without [limit] every record is returned; screens load
+  /// long histories one page at a time.
+  Future<List<Map<String, Object?>>> getPurchaseHistory(int productId, {int? limit, int offset = 0}) async {
     final db = await database;
     return db.rawQuery('''
       SELECT id, product_id, purchase_date AS entry_date, unit_price, quantity,
              supplier AS party_name, invoice_number, notes, created_at, currency_code
       FROM purchase_entries WHERE product_id = ?
-      ORDER BY purchase_date DESC, id DESC
-    ''', [productId]);
+      ORDER BY purchase_date DESC, id DESC LIMIT ? OFFSET ?
+    ''', [productId, limit ?? -1, max(0, offset)]);
   }
 
-  Future<List<Map<String, Object?>>> getSaleHistory(int productId) async {
+  Future<List<Map<String, Object?>>> getSaleHistory(int productId, {int? limit, int offset = 0}) async {
     final db = await database;
     return db.rawQuery('''
       SELECT id, product_id, sale_date AS entry_date, unit_price, quantity,
              customer AS party_name, NULL AS invoice_number, notes, created_at, currency_code
       FROM sale_entries WHERE product_id = ?
-      ORDER BY sale_date DESC, id DESC
-    ''', [productId]);
+      ORDER BY sale_date DESC, id DESC LIMIT ? OFFSET ?
+    ''', [productId, limit ?? -1, max(0, offset)]);
   }
 
   static const String backupFormatName = 'buy_price_assistant_gimi_backup';
@@ -680,6 +810,7 @@ class AppDatabase {
       for (final row in contents.importBatches) {
         await txn.insert('import_batches', row);
       }
+      await refreshSearchIndex(txn);
     });
     return contents;
   }
@@ -701,6 +832,11 @@ class AppDatabase {
       final batch = batches.single;
       if (batch['undone_at'] != null) throw StateError('تم التراجع عن هذه الدفعة سابقًا.');
 
+      final touched = (await txn.rawQuery(
+        'SELECT product_id FROM purchase_entries WHERE import_batch_id = ? '
+        'UNION SELECT product_id FROM sale_entries WHERE import_batch_id = ?',
+        [batchId, batchId],
+      )).map((row) => row['product_id']! as int).toList();
       final purchases = await txn.delete('purchase_entries', where: 'import_batch_id = ?', whereArgs: [batchId]);
       final sales = await txn.delete('sale_entries', where: 'import_batch_id = ?', whereArgs: [batchId]);
       final created = await txn.query('products', columns: ['id'], where: 'import_batch_id = ?', whereArgs: [batchId]);
@@ -731,6 +867,7 @@ class AppDatabase {
           );
         }
       }
+      await refreshSearchIndex(txn, productIds: touched);
       await txn.update('import_batches', {'undone_at': _now()}, where: 'id = ?', whereArgs: [batchId]);
       return ImportUndoResult(
         entriesRemoved: purchases + sales,

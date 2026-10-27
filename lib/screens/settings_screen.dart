@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/app_settings.dart';
+import '../utils/app_info.dart';
 import '../utils/app_text.dart';
 import 'data_exchange_screen.dart';
 import 'support_screen.dart';
@@ -237,7 +238,7 @@ class SettingsScreen extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const AppText(ar: 'حول التطبيق', en: 'About the app'),
-                subtitle: const Text('Buy Price Assistant HJI · 1.4.0'),
+                subtitle: Text('${AppInfo.nameEn} · ${AppInfo.versionLabel}'),
               ),
             ),
           ],

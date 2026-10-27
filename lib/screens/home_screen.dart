@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _productsFuture = AppDatabase.instance.searchProducts('');
+    _productsFuture = AppDatabase.instance.searchProducts('', limit: 250);
     _categoriesFuture = AppDatabase.instance.getDistinctCategories();
     _brandsFuture = AppDatabase.instance.getDistinctBrands();
     _suppliersFuture = AppDatabase.instance.getDistinctSuppliers();
@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _reload([String? query]) {
     if (query != null) _query = query;
-    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query, category: _categoryFilter, brand: _brandFilter, supplier: _supplierFilter));
+    setState(() => _productsFuture = AppDatabase.instance.searchProducts(_query, category: _categoryFilter, brand: _brandFilter, supplier: _supplierFilter, limit: 250));
   }
 
   Future<void> _addProduct() async {
