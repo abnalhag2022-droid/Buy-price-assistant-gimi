@@ -124,18 +124,32 @@ void main() {
     );
     expect((await db.getPurchaseHistory(id)).single['currency_code'], 'USD');
 
-    final decoded = jsonDecode(await db.exportBackupJson()) as Map<String, dynamic>;
-    decoded['schemaVersion'] = 1;
-    final tables = Map<String, dynamic>.from(decoded['tables'] as Map);
-    final entries = (tables['purchase_entries'] as List).map((raw) {
-      final item = Map<String, dynamic>.from(raw as Map);
-      item.remove('currency_code');
-      return item;
-    }).toList();
-    tables['purchase_entries'] = entries;
-    decoded['tables'] = tables;
-    await db.restoreBackupJson(jsonEncode(decoded));
-    expect((await db.getPurchaseHistory(id)).single['currency_code'], 'YER');
+    // A schema v1 backup as version 1.0 wrote it: no currency, no checksum.
+    final legacy = <String, Object?>{
+      'format': 'buy_price_assistant_gimi_backup',
+      'schemaVersion': 1,
+      'createdAt': '2026-01-05T10:00:00.000Z',
+      'tables': {
+        'products': [
+          {
+            'id': 7, 'name': 'صنف قديم', 'search_name': 'صنف قديم', 'code': null, 'search_code': '',
+            'category': null, 'search_category': '', 'unit': 'قطعة', 'brand': null, 'notes': null,
+            'is_favorite': 0, 'is_archived': 0, 'created_at': '2026-01-01T00:00:00', 'updated_at': '2026-01-01T00:00:00',
+          },
+        ],
+        'purchase_entries': [
+          {
+            'id': 1, 'product_id': 7, 'purchase_date': '2026-01-02', 'unit_price': 275.0, 'quantity': 2.0,
+            'supplier': 'مورد سابق', 'invoice_number': null, 'notes': null, 'created_at': '2026-01-02T00:00:00',
+          },
+        ],
+        'sale_entries': <Object?>[],
+      },
+      'counts': {'products': 1, 'purchase_entries': 1, 'sale_entries': 0},
+    };
+    await db.restoreBackupJson(jsonEncode(legacy));
+    expect(await db.getProduct(id), isNull, reason: 'restore replaces all current data');
+    expect((await db.getPurchaseHistory(7)).single['currency_code'], 'YER');
   });
 
 

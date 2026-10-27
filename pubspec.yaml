@@ -18,6 +18,7 @@ dependencies:
   sqflite_common: ^2.5.6
   url_launcher: ^6.3.2
   csv: ^6.0.0
+  crypto: ^3.0.6
   excel_community: ^2.6.0
 
 dev_dependencies:

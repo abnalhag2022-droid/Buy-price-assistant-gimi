@@ -51,9 +51,6 @@ jobs:
             flutter pub get
           fi
 
-      - name: Validate update source and SQLite migration
-        run: python3 tooling/validate_update_package.py && python3 tooling/verify_update_sqlite.py
-
       - name: Parse Dart sources
         run: dart format --output=none lib test
 

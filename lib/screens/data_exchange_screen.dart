@@ -3,8 +3,12 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../data/app_database.dart';
 import '../data/spreadsheet_exchange.dart';
+import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
+import '../utils/error_messages.dart';
+import 'import_preview_screen.dart';
 
 class DataExchangeScreen extends StatefulWidget {
   const DataExchangeScreen({super.key});
@@ -14,6 +18,17 @@ class DataExchangeScreen extends StatefulWidget {
 
 class _DataExchangeScreenState extends State<DataExchangeScreen> {
   bool _busy = false;
+  late Future<List<Map<String, Object?>>> _batches;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBatches();
+  }
+
+  void _loadBatches() {
+    _batches = AppDatabase.instance.listImportBatches(limit: 5);
+  }
 
   void _message(String value) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
@@ -38,10 +53,13 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
         bytes: bytes,
       );
       if (path != null) {
-        _message(appTextValue('تم تصدير جميع الأصناف وسجلات الشراء والبيع التاريخية.', 'All products and purchase/sale history exported.'));
+        _message(appTextValue(
+          'تم التصدير. الملف يحتوي أسعارًا وأسماء موردين وعملاء؛ احفظه في مكان آمن.',
+          'Exported. The file contains prices and supplier/customer names; keep it somewhere safe.',
+        ));
       }
     } catch (e) {
-      _message(appTextValue('تعذر التصدير: ', 'Export failed: ') + e.toString());
+      _message('${appTextValue('تعذر التصدير', 'Export failed')}: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -67,95 +85,57 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
       }
       final preview = await SpreadsheetExchange.instance.previewBytes(bytes, file.name);
       if (!mounted) return;
-      final approved = await _previewDialog(preview, file.name);
-      if (approved != true || !mounted) return;
-      var confirmedDuplicates = false;
-      if (preview.duplicateCount > 0) {
-        confirmedDuplicates = await _duplicateDialog(preview.duplicateCount) ?? false;
-        if (!confirmedDuplicates || !mounted) return;
-      }
-      final imported = await SpreadsheetExchange.instance.importPreview(
-        preview,
-        confirmDuplicates: confirmedDuplicates,
+      setState(() => _busy = false);
+      final imported = await Navigator.of(context).push<SpreadsheetImportResult>(
+        MaterialPageRoute(builder: (_) => ImportPreviewScreen(preview: preview)),
       );
+      if (imported == null || !mounted) return;
+      setState(_loadBatches);
       _message(appTextValue(
-        'اكتمل الاستيراد: ${imported.productsAdded} صنف جديد و${imported.transactionsAdded} عملية تاريخية.',
-        'Import complete: ${imported.productsAdded} new products and ${imported.transactionsAdded} history entries.',
+        'اكتمل الاستيراد: ${imported.productsAdded} صنف جديد و${imported.transactionsAdded} عملية'
+            '${imported.duplicatesSkipped > 0 ? '، وتُخطّي ${imported.duplicatesSkipped} مكرر' : ''}.',
+        'Import complete: ${imported.productsAdded} new products and ${imported.transactionsAdded} entries'
+            '${imported.duplicatesSkipped > 0 ? ', ${imported.duplicatesSkipped} duplicates skipped' : ''}.',
       ));
-    } on SpreadsheetImportException catch (e) {
-      _message(appTextValue('أُوقف الاستيراد لحماية البيانات: ', 'Import stopped to protect data: ') + e.message);
     } catch (e) {
-      _message(appTextValue('تعذر الاستيراد: ', 'Import failed: ') + e.toString());
+      _message('${appTextValue('تعذر قراءة الملف', 'Could not read the file')}: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<bool?> _previewDialog(SpreadsheetPreview preview, String filename) => showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialog) => AlertDialog(
-      title: Text(appTextValue('معاينة الاستيراد', 'Import preview')),
-      content: SizedBox(
-        width: 560,
-        height: 440,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(filename, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 10),
-          _CountLine(ar: 'عمليات صحيحة', en: 'Valid transactions', value: preview.validTransactionCount),
-          _CountLine(ar: 'أصناف مطابقة موجودة', en: 'Matched items', value: preview.matchedProducts),
-          _CountLine(ar: 'أصناف جديدة', en: 'New items', value: preview.newProducts),
-          _CountLine(ar: 'عمليات مكررة', en: 'Duplicate transactions', value: preview.duplicateCount),
-          _CountLine(ar: 'أخطاء تمنع الاستيراد', en: 'Blocking errors', value: preview.errorCount),
-          const Divider(),
-          Text(appTextValue('الأخطاء والتنبيهات', 'Errors and warnings'), style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Expanded(
-            child: preview.issues.isEmpty
-                ? Center(child: Text(appTextValue('لا توجد تنبيهات.', 'No warnings.')))
-                : ListView.builder(
-                    itemCount: preview.issues.length > 100 ? 100 : preview.issues.length,
-                    itemBuilder: (context, index) {
-                      final issue = preview.issues[index];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        child: Text(
-                          '${issue.isError ? '✖ ' : '• '}${appTextValue('صف ', 'Row ')}${issue.row}: ${issue.message}',
-                          style: TextStyle(color: issue.isError ? Theme.of(context).colorScheme.error : null, fontSize: 12),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (preview.issues.length > 100)
-            Text(appTextValue('تُعرض أول 100 ملاحظة.', 'Showing the first 100 notices.'), style: Theme.of(context).textTheme.bodySmall),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(appTextValue('إلغاء', 'Cancel'))),
-        FilledButton(
-          onPressed: preview.canImport ? () => Navigator.of(dialog).pop(true) : null,
-          child: Text(appTextValue('متابعة', 'Continue')),
+  Future<void> _undo(Map<String, Object?> batch) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: AppText(ar: 'التراجع عن الاستيراد', en: 'Undo import'),
+        content: AppText(
+          ar: 'سيُحذف كل ما أضافه هذا الاستيراد: سجلات الأسعار التي أنشأها (حتى لو عدّلتها لاحقًا)، والأصناف التي أنشأها إن لم تُسجَّل لها عمليات أخرى. لا تتأثر بقية البيانات.',
+          en: 'Everything this import added is removed: the price records it created (even if you edited them later) and the products it created unless other records use them. Other data is not affected.',
         ),
-      ],
-    ),
-  );
-
-  Future<bool?> _duplicateDialog(int count) => showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialog) => AlertDialog(
-      title: Text(appTextValue('تأكيد العمليات المكررة', 'Confirm duplicate entries')),
-      content: Text(appTextValue(
-        'عُثر على $count عملية مكررة. الموافقة ستضيفها مرة أخرى دون حذف أي سجل. هل تريد المتابعة؟',
-        '$count duplicate transaction(s) found. Continuing will add them again without deleting existing records. Continue?',
-      )),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: Text(appTextValue('إلغاء', 'Cancel'))),
-        FilledButton(onPressed: () => Navigator.of(dialog).pop(true), child: Text(appTextValue('تأكيد الإضافة', 'Confirm additions'))),
-      ],
-    ),
-  );
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: AppText(ar: 'إلغاء', en: 'Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(dialog).colorScheme.error),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: AppText(ar: 'تراجع', en: 'Undo'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final result = await AppDatabase.instance.undoImportBatch(batch['id']! as String);
+      if (!mounted) return;
+      setState(_loadBatches);
+      _message(appTextValue(
+        'تم التراجع: حُذف ${result.entriesRemoved} سجل و${result.productsRemoved} صنف${result.productsKept > 0 ? '، وبقي ${result.productsKept} صنف لوجود سجلات أخرى عليه' : ''}.',
+        'Undone: ${result.entriesRemoved} records and ${result.productsRemoved} products removed${result.productsKept > 0 ? '; ${result.productsKept} kept because other records use them' : ''}.',
+      ));
+    } catch (e) {
+      _message(friendlyError(e));
+    }
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -167,8 +147,8 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
           const AppText(ar: 'تصدير كامل البيانات', en: 'Export all data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           const AppText(
-            ar: 'يشمل الأصناف النشطة والمؤرشفة وجميع سجلات الشراء والبيع التاريخية، حتى الأصناف التي لا تملك سجل أسعار.',
-            en: 'Includes active and archived products and every purchase/sale history record, including products without price history.',
+            ar: 'يشمل الأصناف النشطة والمؤرشفة وجميع سجلات الشراء والبيع. ملف الجدول لا يحفظ الإعدادات ولا سجل الاستيراد؛ استخدم النسخ الاحتياطي لحفظ نسخة كاملة.',
+            en: 'Includes active and archived products and every purchase/sale record. A spreadsheet does not keep settings or import history; use Backup for a complete copy.',
           ),
           const SizedBox(height: 14),
           SizedBox(width: double.infinity, child: FilledButton.icon(
@@ -191,13 +171,13 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
           const AppText(ar: 'استيراد سجل الأسعار', en: 'Import price history', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           const AppText(
-            ar: 'يدعم XLSX وCSV UTF-8 بعناوين عربية أو إنجليزية. تُعرض المعاينة والأخطاء قبل أي كتابة في قاعدة البيانات.',
-            en: 'Supports XLSX and UTF-8 CSV with Arabic or English headers. Preview and validation happen before data is written.',
+            ar: 'يدعم XLSX وCSV UTF-8 بعناوين عربية أو إنجليزية. تُعرض معاينة كاملة قبل أي كتابة: الأصناف الجديدة، والمطابقة بدقة، والملتبسة التي تحتاج إلى قرارك، والصفوف المرفوضة.',
+            en: 'Supports XLSX and UTF-8 CSV with Arabic or English headers. A full preview comes first: new products, exact matches, ambiguous ones that need your decision, and rejected rows.',
           ),
           const SizedBox(height: 8),
           const AppText(
-            ar: 'تتم المطابقة بالاسم ووحدة القياس فقط. لا تتغير بيانات الصنف الموجود، ولا يُحذف أي سجل. الصنف الجديد يحتاج إلى عملية شراء صحيحة واحدة على الأقل.',
-            en: 'Matching uses normalized product name and unit only. Existing product metadata stays unchanged and no records are deleted. A new product needs at least one valid purchase.',
+            ar: 'المطابقة التلقائية تتم فقط عند تطابق الاسم بالترتيب نفسه والوحدة، أو الكود. لا تتغير بيانات الصنف الموجود ولا يُحذف أي سجل.',
+            en: 'Automatic matching only happens for the same name in the same word order and unit, or the same code. Existing product details are never changed and nothing is deleted.',
           ),
           const SizedBox(height: 14),
           SizedBox(width: double.infinity, child: FilledButton.icon(
@@ -208,26 +188,38 @@ class _DataExchangeScreenState extends State<DataExchangeScreen> {
         ]),
       )),
       if (_busy) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+      const SizedBox(height: 12),
+      FutureBuilder<List<Map<String, Object?>>>(
+        future: _batches,
+        builder: (context, snapshot) {
+          final batches = snapshot.data ?? const <Map<String, Object?>>[];
+          if (batches.isEmpty) return const SizedBox.shrink();
+          return Card(child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const AppText(ar: 'آخر عمليات الاستيراد', en: 'Recent imports', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              for (final b in batches)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(ltrIsolate(b['file_name'] as String? ?? '—'), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                    '${formatDateTime(b['created_at'] as String?, Localizations.localeOf(context).languageCode)} · '
+                    '${appTextValue('أصناف', 'products')} ${b['products_added']} · ${appTextValue('عمليات', 'entries')} ${b['entries_added']}'
+                    '${b['undone_at'] != null ? ' · ${appTextValue('تم التراجع', 'undone')}' : ''}',
+                  ),
+                  trailing: b['undone_at'] != null
+                      ? null
+                      : TextButton(onPressed: () => _undo(b), child: const AppText(ar: 'تراجع', en: 'Undo')),
+                ),
+            ]),
+          ));
+        },
+      ),
       const SizedBox(height: 10),
       const AppText(
-        ar: 'ملفات XLS القديمة غير مدعومة مباشرة؛ احفظها من Excel أو LibreOffice بصيغة XLSX أو CSV UTF-8. استعادة النسخة الاحتياطية JSON مستقلة ولا تتأثر بهذا الاستيراد.',
-        en: 'Legacy XLS files are not imported directly; save them from Excel or LibreOffice as XLSX or UTF-8 CSV. JSON backup restore is unchanged and separate.',
+        ar: 'ملفات XLS القديمة غير مدعومة؛ احفظها بصيغة XLSX أو CSV UTF-8.',
+        en: 'Legacy XLS files are not supported; save them as XLSX or UTF-8 CSV.',
       ),
-    ]),
-  );
-}
-
-class _CountLine extends StatelessWidget {
-  const _CountLine({required this.ar, required this.en, required this.value});
-  final String ar;
-  final String en;
-  final int value;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(children: [
-      Expanded(child: AppText(ar: ar, en: en)),
-      Text(value.toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
     ]),
   );
 }

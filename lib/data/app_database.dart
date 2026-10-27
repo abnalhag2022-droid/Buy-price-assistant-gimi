@@ -1,10 +1,28 @@
 import 'dart:convert';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../utils/app_helpers.dart';
+import '../utils/currencies.dart';
+import 'backup_validator.dart';
+
+export 'backup_validator.dart' show BackupContents, ImportUndoResult;
+
+/// Thrown when the database file was written by a newer app version.
+/// Opening it with an older schema could silently corrupt data, so the app stops.
+class DatabaseVersionTooNewException implements Exception {
+  const DatabaseVersionTooNewException(this.fileVersion, this.appVersion);
+  final int fileVersion;
+  final int appVersion;
+
+  @override
+  String toString() =>
+      'قاعدة البيانات أنشأها إصدار أحدث من التطبيق (مخطط $fileVersion، والمدعوم $appVersion). ثبّت الإصدار الأحدث؛ لم تُعدَّل البيانات.';
+}
 
 class AppDatabase {
   AppDatabase({
@@ -13,10 +31,21 @@ class AppDatabase {
   })  : _factory = factory ?? sqflite.databaseFactory,
         _databasePathProvider = databasePathProvider ?? sqflite.getDatabasesPath;
 
-  static final AppDatabase instance = AppDatabase();
+  static AppDatabase _instance = AppDatabase();
+
+  /// The database used by the app. Tests may replace it with an in-memory one.
+  static AppDatabase get instance => _instance;
+
+  @visibleForTesting
+  static set instance(AppDatabase value) => _instance = value;
 
   static const _databaseName = 'buy_price_assistant_gimi.db';
-  static const _databaseVersion = 3;
+
+  /// Schema history:
+  /// 1 = initial; 2 = currency per entry; 3 = digit-normalized search columns;
+  /// 4 = import batches (import_batch_id + import_batches table).
+  /// Never redefine a released version: add a new one instead.
+  static const int schemaVersion = 4;
 
   final DatabaseFactory _factory;
   final Future<String> Function() _databasePathProvider;
@@ -29,31 +58,70 @@ class AppDatabase {
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: _databaseVersion,
+        version: schemaVersion,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
+        onDowngrade: (db, oldVersion, newVersion) async {
+          throw DatabaseVersionTooNewException(oldVersion, newVersion);
+        },
       ),
     );
     return _database!;
   }
 
+  /// Every step is idempotent: a user who downgraded with an older app (which
+  /// silently lowers user_version) and upgrades again must not hit
+  /// "duplicate column" errors.
   Future<void> _upgradeSchema(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      await db.execute("ALTER TABLE purchase_entries ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'YER'");
-      await db.execute("ALTER TABLE sale_entries ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'YER'");
+      await _addColumnIfMissing(db, 'purchase_entries', 'currency_code', "TEXT NOT NULL DEFAULT 'YER'");
+      await _addColumnIfMissing(db, 'sale_entries', 'currency_code', "TEXT NOT NULL DEFAULT 'YER'");
     }
-    if (oldVersion < 3) {
-      final products = await db.query('products', columns: ['id', 'name', 'code', 'category']);
-      for (final product in products) {
-        await db.update('products', {
-          'search_name': normalizeForSearch(product['name'] as String? ?? ''),
-          'search_code': normalizeForSearch(product['code'] as String? ?? ''),
-          'search_category': normalizeForSearch(product['category'] as String? ?? ''),
-        }, where: 'id = ?', whereArgs: [product['id']]);
-      }
+    if (oldVersion < 4) {
+      await _addColumnIfMissing(db, 'products', 'import_batch_id', 'TEXT');
+      await _addColumnIfMissing(db, 'purchase_entries', 'import_batch_id', 'TEXT');
+      await _addColumnIfMissing(db, 'sale_entries', 'import_batch_id', 'TEXT');
+      await _createImportBatchObjects(db);
+    }
+    // Search columns depend on normalizeForSearch, which changed in v3.
+    // Recomputing them is cheap and keeps every upgraded install consistent.
+    await _recomputeProductSearchColumns(db);
+  }
+
+  Future<void> _addColumnIfMissing(DatabaseExecutor db, String table, String column, String definition) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    if (info.any((row) => row['name'] == column)) return;
+    await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+  }
+
+  Future<void> _createImportBatchObjects(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS import_batches (
+        id TEXT PRIMARY KEY,
+        file_name TEXT,
+        created_at TEXT NOT NULL,
+        products_added INTEGER NOT NULL DEFAULT 0,
+        entries_added INTEGER NOT NULL DEFAULT 0,
+        unarchived_product_ids TEXT,
+        undone_at TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_purchase_import_batch ON purchase_entries(import_batch_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_sale_import_batch ON sale_entries(import_batch_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_products_import_batch ON products(import_batch_id)');
+  }
+
+  Future<void> _recomputeProductSearchColumns(DatabaseExecutor db) async {
+    final products = await db.query('products', columns: ['id', 'name', 'code', 'category']);
+    for (final product in products) {
+      await db.update('products', {
+        'search_name': normalizeForSearch(product['name'] as String? ?? ''),
+        'search_code': normalizeForSearch(product['code'] as String? ?? ''),
+        'search_category': normalizeForSearch(product['category'] as String? ?? ''),
+      }, where: 'id = ?', whereArgs: [product['id']]);
     }
   }
 
@@ -73,7 +141,8 @@ class AppDatabase {
         is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
         is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        import_batch_id TEXT
       )
     ''');
     await db.execute('''
@@ -88,6 +157,7 @@ class AppDatabase {
         invoice_number TEXT,
         notes TEXT,
         created_at TEXT NOT NULL,
+        import_batch_id TEXT,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
       )
     ''');
@@ -102,6 +172,7 @@ class AppDatabase {
         customer TEXT,
         notes TEXT,
         created_at TEXT NOT NULL,
+        import_batch_id TEXT,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
       )
     ''');
@@ -109,6 +180,7 @@ class AppDatabase {
     await db.execute('CREATE INDEX idx_products_search_code ON products(search_code)');
     await db.execute('CREATE INDEX idx_purchase_product_date ON purchase_entries(product_id, purchase_date DESC, id DESC)');
     await db.execute('CREATE INDEX idx_sale_product_date ON sale_entries(product_id, sale_date DESC, id DESC)');
+    await _createImportBatchObjects(db);
   }
 
   String _now() => DateTime.now().toIso8601String();
@@ -317,10 +389,8 @@ class AppDatabase {
   }
 
   String _validatedCurrency(String currencyCode) {
-    final code = currencyCode.trim().toUpperCase();
-    if (!const <String>{'YER', 'SAR', 'USD'}.contains(code)) {
-      throw ArgumentError('العملة غير مدعومة: $currencyCode');
-    }
+    final code = AppCurrencies.tryParse(currencyCode);
+    if (code == null) throw ArgumentError('العملة غير مدعومة: $currencyCode');
     return code;
   }
 
@@ -525,116 +595,155 @@ class AppDatabase {
     ''', [productId]);
   }
 
-  /// Exports all user data, including archived products and every price record.
+  static const String backupFormatName = 'buy_price_assistant_gimi_backup';
+
+  /// Backup file versions: 1 = no currency; 2 = currency per entry;
+  /// 3 = import batches, SHA-256 checksum, derived search columns omitted.
+  static const int backupSchemaVersion = 3;
+
+  static const Map<String, List<String>> _backupColumns = <String, List<String>>{
+    'products': <String>[
+      'id', 'name', 'code', 'category', 'unit', 'brand', 'notes', 'is_favorite',
+      'is_archived', 'created_at', 'updated_at', 'import_batch_id',
+    ],
+    'purchase_entries': <String>[
+      'id', 'product_id', 'purchase_date', 'unit_price', 'currency_code', 'quantity',
+      'supplier', 'invoice_number', 'notes', 'created_at', 'import_batch_id',
+    ],
+    'sale_entries': <String>[
+      'id', 'product_id', 'sale_date', 'unit_price', 'currency_code', 'quantity',
+      'customer', 'notes', 'created_at', 'import_batch_id',
+    ],
+    'import_batches': <String>[
+      'id', 'file_name', 'created_at', 'products_added', 'entries_added',
+      'unarchived_product_ids', 'undone_at',
+    ],
+  };
+
+  /// Exports all user data, including archived products, every price record
+  /// and import-batch history, with counts and a SHA-256 checksum of `tables`.
   Future<String> exportBackupJson() async {
     final db = await database;
-    final products = await db.query('products', orderBy: 'id ASC');
-    final purchases = await db.query('purchase_entries', orderBy: 'id ASC');
-    final sales = await db.query('sale_entries', orderBy: 'id ASC');
+    final tables = <String, Object?>{};
+    final counts = <String, int>{};
+    for (final entry in _backupColumns.entries) {
+      final rows = await db.query(
+        entry.key,
+        columns: entry.value,
+        orderBy: entry.key == 'import_batches' ? 'created_at ASC, id ASC' : 'id ASC',
+      );
+      tables[entry.key] = rows;
+      counts[entry.key] = rows.length;
+    }
     final payload = <String, Object?>{
-      'format': 'buy_price_assistant_gimi_backup',
-      'schemaVersion': 2,
+      'format': backupFormatName,
+      'schemaVersion': backupSchemaVersion,
       'createdAt': DateTime.now().toUtc().toIso8601String(),
-      'tables': <String, Object?>{
-        'products': products,
-        'purchase_entries': purchases,
-        'sale_entries': sales,
-      },
-      'counts': <String, int>{
-        'products': products.length,
-        'purchase_entries': purchases.length,
-        'sale_entries': sales.length,
+      'tables': tables,
+      'counts': counts,
+      'checksum': <String, String>{
+        'algorithm': 'sha256',
+        'value': BackupValidator.checksumOf(tables),
       },
     };
     return const JsonEncoder.withIndent('  ').convert(payload);
   }
 
-  /// Replaces all local records atomically. Invalid backups leave existing data untouched.
-  Future<void> restoreBackupJson(String source) async {
-    final decoded = jsonDecode(source);
-    if (decoded is! Map<String, dynamic> ||
-        decoded['format'] != 'buy_price_assistant_gimi_backup' ||
-        !(decoded['schemaVersion'] == 1 || decoded['schemaVersion'] == 2) ||
-        decoded['tables'] is! Map<String, dynamic>) {
-      throw const FormatException('ملف النسخة الاحتياطية غير معروف أو غير مدعوم.');
-    }
-
-    final tables = decoded['tables'] as Map<String, dynamic>;
-    const columns = <String, Set<String>>{
-      'products': {
-        'id', 'name', 'search_name', 'code', 'search_code', 'category',
-        'search_category', 'unit', 'brand', 'notes', 'is_favorite',
-        'is_archived', 'created_at', 'updated_at',
-      },
-      'purchase_entries': {
-        'id', 'product_id', 'purchase_date', 'unit_price', 'currency_code', 'quantity',
-        'supplier', 'invoice_number', 'notes', 'created_at',
-      },
-      'sale_entries': {
-        'id', 'product_id', 'sale_date', 'unit_price', 'currency_code', 'quantity',
-        'customer', 'notes', 'created_at',
-      },
-    };
-    const required = <String, Set<String>>{
-      'products': {
-        'id', 'name', 'search_name', 'search_code', 'search_category',
-        'unit', 'is_favorite', 'is_archived', 'created_at', 'updated_at',
-      },
-      'purchase_entries': {
-        'id', 'product_id', 'purchase_date', 'unit_price', 'quantity', 'created_at',
-      },
-      'sale_entries': {
-        'id', 'product_id', 'sale_date', 'unit_price', 'quantity', 'created_at',
-      },
-    };
-
-    final normalized = <String, List<Map<String, Object?>>>{};
-    for (final table in columns.keys) {
-      final rows = tables[table];
-      if (rows is! List) {
-        throw FormatException('بيانات الجدول $table غير موجودة في النسخة الاحتياطية.');
-      }
-      final cleanRows = <Map<String, Object?>>[];
-      for (final row in rows) {
-        if (row is! Map) {
-          throw FormatException('توجد بيانات غير صحيحة داخل الجدول $table.');
-        }
-        final item = Map<String, Object?>.from(row);
-        if (table == 'purchase_entries' || table == 'sale_entries') {
-          // Schema v1 backups did not store currency. Their original display currency was YER.
-          item.putIfAbsent('currency_code', () => 'YER');
-          final currency = item['currency_code'];
-          if (currency is! String || !const <String>{'YER', 'SAR', 'USD'}.contains(currency)) {
-            throw FormatException('العملة غير صالحة في الجدول $table.');
-          }
-        }
-        if (!columns[table]!.containsAll(item.keys) ||
-            !item.keys.toSet().containsAll(required[table]!)) {
-          throw FormatException('أعمدة الجدول $table لا تتوافق مع إصدار قاعدة البيانات.');
-        }
-        if (item['id'] is! int) {
-          throw FormatException('يوجد معرّف غير صحيح في الجدول $table.');
-        }
-        cleanRows.add(item);
-      }
-      normalized[table] = cleanRows;
-    }
-
+  /// Replaces all local records atomically after validating the whole file.
+  /// Any validation or database error leaves the existing data untouched.
+  /// Derived search columns are always recomputed from the restored values.
+  Future<BackupContents> restoreBackupJson(String source) async {
+    final contents = BackupValidator.parse(source);
     final db = await database;
     await db.transaction((txn) async {
       await txn.delete('purchase_entries');
       await txn.delete('sale_entries');
       await txn.delete('products');
-      for (final row in normalized['products']!) {
-        await txn.insert('products', row);
+      await txn.delete('import_batches');
+      for (final row in contents.products) {
+        final name = row['name']! as String;
+        final code = row['code'] as String?;
+        final category = row['category'] as String?;
+        await txn.insert('products', <String, Object?>{
+          ...row,
+          'search_name': normalizeForSearch(name),
+          'search_code': normalizeForSearch(code ?? ''),
+          'search_category': normalizeForSearch(category ?? ''),
+        });
       }
-      for (final row in normalized['purchase_entries']!) {
+      for (final row in contents.purchases) {
         await txn.insert('purchase_entries', row);
       }
-      for (final row in normalized['sale_entries']!) {
+      for (final row in contents.sales) {
         await txn.insert('sale_entries', row);
       }
+      for (final row in contents.importBatches) {
+        await txn.insert('import_batches', row);
+      }
     });
+    return contents;
+  }
+
+  /// Most recent import batches first.
+  Future<List<Map<String, Object?>>> listImportBatches({int limit = 20}) async {
+    final db = await database;
+    return db.query('import_batches', orderBy: 'created_at DESC, id DESC', limit: limit);
+  }
+
+  /// Removes everything a spreadsheet import added: its price entries, the
+  /// products it created (only when no other entry references them) and it
+  /// re-archives products the import un-archived. Other data is never touched.
+  Future<ImportUndoResult> undoImportBatch(String batchId) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final batches = await txn.query('import_batches', where: 'id = ?', whereArgs: [batchId], limit: 1);
+      if (batches.isEmpty) throw StateError('دفعة الاستيراد غير موجودة.');
+      final batch = batches.single;
+      if (batch['undone_at'] != null) throw StateError('تم التراجع عن هذه الدفعة سابقًا.');
+
+      final purchases = await txn.delete('purchase_entries', where: 'import_batch_id = ?', whereArgs: [batchId]);
+      final sales = await txn.delete('sale_entries', where: 'import_batch_id = ?', whereArgs: [batchId]);
+      final created = await txn.query('products', columns: ['id'], where: 'import_batch_id = ?', whereArgs: [batchId]);
+      var removed = 0;
+      var kept = 0;
+      for (final product in created) {
+        final id = product['id']! as int;
+        final used = await txn.rawQuery(
+          'SELECT 1 FROM purchase_entries WHERE product_id = ? UNION ALL SELECT 1 FROM sale_entries WHERE product_id = ? LIMIT 1',
+          [id, id],
+        );
+        if (used.isEmpty) {
+          removed += await txn.delete('products', where: 'id = ?', whereArgs: [id]);
+        } else {
+          kept++;
+        }
+      }
+      var rearchived = 0;
+      final unarchived = batch['unarchived_product_ids'] as String?;
+      if (unarchived != null && unarchived.isNotEmpty) {
+        final ids = (jsonDecode(unarchived) as List).whereType<int>();
+        for (final id in ids) {
+          rearchived += await txn.update(
+            'products',
+            {'is_archived': 1, 'updated_at': _now()},
+            where: 'id = ? AND is_archived = 0',
+            whereArgs: [id],
+          );
+        }
+      }
+      await txn.update('import_batches', {'undone_at': _now()}, where: 'id = ?', whereArgs: [batchId]);
+      return ImportUndoResult(
+        entriesRemoved: purchases + sales,
+        productsRemoved: removed,
+        productsKept: kept,
+        productsRearchived: rearchived,
+      );
+    });
+  }
+
+  static String newImportBatchId() {
+    final random = Random.secure().nextInt(1 << 32).toRadixString(16).padLeft(8, '0');
+    return 'imp_${DateTime.now().toUtc().microsecondsSinceEpoch}_$random';
   }
 
   Future<void> close() async {
