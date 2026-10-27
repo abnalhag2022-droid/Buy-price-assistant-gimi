@@ -5,12 +5,14 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../data/app_database.dart';
-import '../state/app_settings.dart';
+import '../data/backup_service.dart';
+import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
+import '../utils/error_messages.dart';
 
 class BackupRestoreScreen extends StatefulWidget {
-  const BackupRestoreScreen({super.key});
+  const BackupRestoreScreen({super.key, this.service});
+  final BackupService? service;
 
   @override
   State<BackupRestoreScreen> createState() => _BackupRestoreScreenState();
@@ -18,65 +20,54 @@ class BackupRestoreScreen extends StatefulWidget {
 
 class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   bool _busy = false;
+  late Future<List<SafetySnapshot>> _snapshots;
+
+  BackupService get _service => widget.service ?? BackupService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _snapshots = _service.listSnapshots();
+  }
 
   void _message(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
+  String _stamp() {
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}';
+  }
+
   Future<void> _exportBackup() async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final databaseJson = await AppDatabase.instance.exportBackupJson();
-      final archive = Map<String, Object?>.from(jsonDecode(databaseJson) as Map);
-      archive['settings'] = AppSettings.instance.exportSettings();
-      final json = const JsonEncoder.withIndent('  ').convert(archive);
-      final now = DateTime.now();
-      final stamp = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
-          '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+      final json = await _service.buildFullBackup();
       final output = await FilePicker.platform.saveFile(
-        dialogTitle: 'حفظ النسخة الاحتياطية',
-        fileName: 'gimi_backup_$stamp.json',
+        dialogTitle: appTextValue('حفظ النسخة الاحتياطية', 'Save backup'),
+        fileName: 'hji_backup_${_stamp()}.json',
         type: FileType.custom,
         allowedExtensions: const ['json'],
         bytes: Uint8List.fromList(utf8.encode(json)),
       );
-      if (output != null) _message(appTextValue('تم إنشاء ملف النسخة الاحتياطية بنجاح.', 'Backup file created successfully.'));
+      if (output != null) {
+        _message(appTextValue(
+          'تم إنشاء النسخة الاحتياطية. تحتوي كل أسعارك وأسماء الموردين والعملاء؛ احفظها خارج الهاتف في مكان آمن.',
+          'Backup created. It contains all prices and supplier/customer names; keep it off the phone somewhere safe.',
+        ));
+      }
     } catch (error) {
-      _message('${appTextValue('تعذر إنشاء النسخة الاحتياطية', 'Could not create backup')}: $error');
+      _message('${appTextValue('تعذر إنشاء النسخة الاحتياطية', 'Could not create backup')}: ${friendlyError(error)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<bool> _confirmRestore() async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const AppText(ar: 'تأكيد استعادة البيانات', en: 'Confirm data restore'),
-            content: const AppText(
-              ar: 'ستُستبدل بيانات الأصناف وسجلات الشراء والبيع الحالية بمحتويات الملف. أنشئ نسخة احتياطية من بياناتك الحالية أولاً.',
-              en: 'Current items and purchase/sale history will be replaced by the selected file. Create a backup of your current data first.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const AppText(ar: 'إلغاء', en: 'Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const AppText(ar: 'متابعة', en: 'Continue'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-  }
-
-  Future<void> _restoreBackup() async {
+  Future<void> _restoreFromFile() async {
     if (_busy) return;
-    if (!await _confirmRestore() || !mounted) return;
     setState(() => _busy = true);
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -95,40 +86,93 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       } else {
         throw const FormatException('تعذر قراءة الملف المختار.');
       }
-      final content = utf8.decode(bytes, allowMalformed: false);
-      final decoded = jsonDecode(content);
-      Map<String, Object?>? restoredSettings;
-      if (decoded is Map && decoded['settings'] != null) {
-        restoredSettings = AppSettings.validateBackupSettings(decoded['settings']);
-      }
-      // Stage settings first. If the database restore fails, roll the settings
-      // back so the two parts of a backup do not intentionally diverge.
-      final previousSettings = restoredSettings == null
-          ? null
-          : AppSettings.instance.exportSettings();
-      if (restoredSettings != null) {
-        await AppSettings.instance.restoreSettings(restoredSettings);
-      }
+      final String content;
       try {
-        await AppDatabase.instance.restoreBackupJson(content);
-      } catch (restoreError) {
-        if (previousSettings != null) {
-          try {
-            await AppSettings.instance.restoreSettings(previousSettings);
-          } catch (rollbackError) {
-            throw StateError(
-              'فشلت استعادة قاعدة البيانات ($restoreError)، كما تعذر التراجع عن الإعدادات ($rollbackError).',
-            );
-          }
-        }
-        rethrow;
+        content = utf8.decode(bytes);
+      } on FormatException {
+        throw const FormatException('الملف ليس نسخة احتياطية نصية بترميز UTF-8.');
       }
-      _message(appTextValue('تمت استعادة البيانات بنجاح.', 'Data restored successfully.'));
+      await _confirmAndRestore(content, ltrIsolate(file.name));
     } catch (error) {
-      _message('${appTextValue('لم تتم الاستعادة؛ لم تُعتمد بيانات الملف.', 'Restore failed; file data was not applied.')}: $error');
+      _message('${appTextValue('لم تتم الاستعادة؛ بياناتك الحالية لم تتغير', 'Restore failed; your current data is unchanged')}: ${friendlyError(error)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _restoreSnapshot(SafetySnapshot snapshot) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _confirmAndRestore(await _service.readSnapshot(snapshot), _snapshotTitle(snapshot));
+    } catch (error) {
+      _message('${appTextValue('لم تتم الاستعادة؛ بياناتك الحالية لم تتغير', 'Restore failed; your current data is unchanged')}: ${friendlyError(error)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmAndRestore(String content, String sourceLabel) async {
+    // Validation happens before any confirmation; an invalid file never gets this far.
+    final summary = _service.inspect(content);
+    if (!mounted) return;
+    final created = summary.createdAt == null
+        ? appTextValue('غير معروف', 'unknown')
+        : formatDateTime(summary.createdAt, Localizations.localeOf(context).languageCode);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: AppText(ar: 'استبدال جميع البيانات؟', en: 'Replace all data?'),
+        content: SingleChildScrollView(
+          child: Text(appTextValue(
+            'الملف: $sourceLabel\nأُنشئ: $created\nيحتوي: ${summary.products} صنف، ${summary.purchases} عملية شراء، ${summary.sales} عملية بيع${summary.hasSettings ? '، والإعدادات' : ''}.\n\n'
+                'ستُستبدل كل بياناتك الحالية بمحتوى الملف. ستُحفظ نسخة أمان تلقائية من بياناتك الحالية أولًا ويمكنك استعادتها من هذه الشاشة.',
+            'File: $sourceLabel\nCreated: $created\nContains: ${summary.products} products, ${summary.purchases} purchases, ${summary.sales} sales${summary.hasSettings ? ', and settings' : ''}.\n\n'
+                'All current data will be replaced. An automatic safety copy of your current data is saved first and can be restored from this screen.',
+          )),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: AppText(ar: 'إلغاء', en: 'Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(dialog).colorScheme.error),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: AppText(ar: 'استبدال البيانات', en: 'Replace data'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final outcome = await _service.restoreFullBackup(content);
+    if (!mounted) return;
+    setState(() => _snapshots = _service.listSnapshots());
+    _message(appTextValue(
+      'تمت الاستعادة. حُفظت بياناتك السابقة في نسخة أمان (${_snapshotTitle(outcome.safetySnapshot)}).',
+      'Restored. Your previous data was saved as a safety copy (${_snapshotTitle(outcome.safetySnapshot)}).',
+    ));
+  }
+
+  Future<void> _saveSnapshotCopy(SafetySnapshot snapshot) async {
+    try {
+      final output = await FilePicker.platform.saveFile(
+        dialogTitle: appTextValue('حفظ نسخة الأمان', 'Save safety copy'),
+        fileName: snapshot.fileName,
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: await snapshot.file.readAsBytes(),
+      );
+      if (output != null) _message(appTextValue('تم حفظ نسخة الأمان.', 'Safety copy saved.'));
+    } catch (error) {
+      _message(friendlyError(error));
+    }
+  }
+
+  String _snapshotTitle(SafetySnapshot s) {
+    final reason = switch (s.reason) {
+      'before_restore' => appTextValue('قبل الاستعادة', 'before restore'),
+      'before_import' => appTextValue('قبل الاستيراد', 'before import'),
+      _ => appTextValue('يدوية', 'manual'),
+    };
+    return '${formatDateTime(s.createdAt.toIso8601String(), Localizations.localeOf(context).languageCode)} · $reason';
   }
 
   @override
@@ -144,13 +188,11 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.shield_outlined, size: 34),
-                  const SizedBox(height: 12),
-                  const AppText(ar: 'حافظ على بياناتك', en: 'Protect your data', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const AppText(ar: 'إنشاء نسخة احتياطية', en: 'Create a backup', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   const AppText(
-                    ar: 'تتضمن النسخة الاحتياطية الأصناف النشطة والمؤرشفة وسجلات الشراء والبيع والأسعار والكميات والتواريخ والموردين والعملاء والملاحظات، إضافة إلى إعدادات اللغة والمظهر والعملة والتصنيفات والوحدات.',
-                    en: 'The backup contains active and archived items, purchase/sale history, prices, quantities, dates, suppliers, customers, notes, and your language, theme, currency, category, and unit settings.',
+                    ar: 'ملف JSON يحتوي كل الأصناف النشطة والمؤرشفة وسجلات الشراء والبيع وسجل الاستيراد والإعدادات، مع بصمة تحقق تكشف أي تلف. الملف غير مشفّر؛ احفظه في مكان آمن خارج الهاتف.',
+                    en: 'A JSON file with all active and archived products, purchase and sale records, import history and settings, with a checksum that detects damage. The file is not encrypted; keep it somewhere safe off the phone.',
                     style: TextStyle(height: 1.5),
                   ),
                   const SizedBox(height: 16),
@@ -170,18 +212,16 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.restore, size: 34),
-                  const SizedBox(height: 12),
-                  const AppText(ar: 'استعادة من ملف', en: 'Restore from file', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const AppText(ar: 'استعادة من ملف', en: 'Restore from a file', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   const AppText(
-                    ar: 'اختر ملفًا أنشأه التطبيق. تُفحص بنيته أولًا ثم تُستعاد البيانات داخل معاملة واحدة. تقبل الاستعادة النسخ القديمة، وتُلغى العملية إذا فشل فحص البيانات.',
-                    en: 'Choose a backup file created by this app. Its structure is checked first, then restored in one database transaction. Older backups remain supported, and invalid data is rejected.',
+                    ar: 'يُفحص الملف كاملًا ويُعرض ملخصه قبل التأكيد. الاستعادة تستبدل كل البيانات الحالية، وتُحفظ نسخة أمان تلقائية قبلها. تُقبل النسخ من الإصدارات السابقة.',
+                    en: 'The whole file is checked and summarised before you confirm. Restoring replaces all current data, and an automatic safety copy is saved first. Backups from earlier versions are accepted.',
                     style: TextStyle(height: 1.5),
                   ),
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
-                    onPressed: _busy ? null : _restoreBackup,
+                    onPressed: _busy ? null : _restoreFromFile,
                     icon: const Icon(Icons.folder_open),
                     label: const AppText(ar: 'اختيار ملف للاستعادة', en: 'Choose backup file'),
                   ),
@@ -189,16 +229,56 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               ),
             ),
           ),
-          if (_busy) ...[
-            const SizedBox(height: 20),
-            const Center(child: CircularProgressIndicator()),
-            const SizedBox(height: 8),
-            const Center(child: AppText(ar: 'يرجى الانتظار...', en: 'Please wait...')),
-          ],
+          if (_busy) const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator())),
           const SizedBox(height: 12),
-          const Text(
-            'تنبيه: الاستعادة تستبدل بيانات الأصناف والأسعار الحالية. احتفظ بنسخة احتياطية قبل الاستعادة.',
-            style: TextStyle(color: Colors.redAccent, height: 1.5),
+          FutureBuilder<List<SafetySnapshot>>(
+            future: _snapshots,
+            builder: (context, snapshot) {
+              final items = snapshot.data ?? const <SafetySnapshot>[];
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const AppText(ar: 'نسخ الأمان التلقائية', en: 'Automatic safety copies', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 6),
+                    AppText(
+                      ar: 'تُحفظ تلقائيًا قبل كل استعادة أو استيراد، ويُحتفظ بآخر ${BackupService.keepSnapshots} نسخ داخل التطبيق فقط. تُحذف إذا حُذف التطبيق، لذا لا تغني عن نسختك الاحتياطية.',
+                      en: 'Saved automatically before every restore or import; the last ${BackupService.keepSnapshots} are kept inside the app only. They are removed if the app is uninstalled, so keep your own backup too.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (items.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: AppText(ar: 'لا توجد نسخ أمان بعد.', en: 'No safety copies yet.', style: Theme.of(context).textTheme.bodyMedium),
+                      ),
+                    for (final s in items)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.history_toggle_off),
+                        title: Text(_snapshotTitle(s)),
+                        subtitle: Text('${(s.sizeBytes / 1024).toStringAsFixed(1)} KB'),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: appTextValue('إجراءات', 'Actions'),
+                          onSelected: (value) {
+                            if (value == 'restore') _restoreSnapshot(s);
+                            if (value == 'save') _saveSnapshotCopy(s);
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(value: 'restore', child: AppText(ar: 'استعادة هذه النسخة', en: 'Restore this copy')),
+                            PopupMenuItem(value: 'save', child: AppText(ar: 'حفظ نسخة منها في ملف', en: 'Save a copy to a file')),
+                          ],
+                        ),
+                      ),
+                  ]),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          AppText(
+            ar: 'نسخ Android التلقائي: قد يحفظ Android بيانات التطبيق ضمن نسخ حسابك في Google إذا كان مفعّلًا على الهاتف، ويستعيدها عند نقلها إلى هاتف جديد.',
+            en: 'Android auto backup: if enabled on the phone, Android may include this app\'s data in your Google account backup and restore it on a new phone.',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
       ),

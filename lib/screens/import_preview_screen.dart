@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/backup_service.dart';
 import '../data/spreadsheet_exchange.dart';
 import '../utils/app_helpers.dart';
 import '../utils/app_text.dart';
@@ -8,10 +9,11 @@ import '../utils/error_messages.dart';
 /// Full-page import preview. Nothing is written until the user presses
 /// "Import" and every ambiguous product has an explicit decision.
 class ImportPreviewScreen extends StatefulWidget {
-  const ImportPreviewScreen({super.key, required this.preview, this.exchange});
+  const ImportPreviewScreen({super.key, required this.preview, this.exchange, this.backupService});
 
   final SpreadsheetPreview preview;
   final SpreadsheetExchange? exchange;
+  final BackupService? backupService;
 
   @override
   State<ImportPreviewScreen> createState() => _ImportPreviewScreenState();
@@ -89,6 +91,9 @@ class _ImportPreviewScreenState extends State<ImportPreviewScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _importing = true);
     try {
+      // A safety copy first: the import can also be undone, but this protects
+      // against anything unexpected.
+      await (widget.backupService ?? BackupService.instance).createSafetySnapshot('before_import');
       final decisions = <int, ImportDecision>{..._preview.automaticDecisions, ..._choices};
       final result = await _exchange.importPreview(
         _preview,
