@@ -2,9 +2,9 @@ name: Android CI
 
 on:
   push:
-    branches: [main, update-v2, update-v3, development-v1.2.0, feature/excel-import-export-v1.3.0, feature/hji-professional-upgrade]
+    branches: [main, update-v2, update-v3, development-v1.2.0, feature/excel-import-export-v1.3.0, feature/hji-professional-upgrade, claude-development]
   pull_request:
-    branches: [main, update-v2, update-v3, development-v1.2.0, feature/excel-import-export-v1.3.0, feature/hji-professional-upgrade]
+    branches: [main, update-v2, update-v3, development-v1.2.0, feature/excel-import-export-v1.3.0, feature/hji-professional-upgrade, claude-development]
   workflow_dispatch:
 
 permissions:
