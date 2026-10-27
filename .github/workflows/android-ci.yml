@@ -183,7 +183,7 @@ jobs:
           set -euo pipefail
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           "$BUILD_TOOLS/aapt2" dump badging build/app/outputs/flutter-apk/app-release.apk > badging.txt
-          grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission|application-label|application-icon-160|application:)" badging.txt
+          grep -E "^(package|sdkVersion|minSdkVersion|targetSdkVersion|uses-permission|application-label:|application-icon-160|application:)" badging.txt
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -194,10 +194,13 @@ jobs:
               "package": "name='com.abnalhag.gimi.buy_price_assistant_gimi'",
               "versionCode": f"versionCode='{code}'",
               "versionName": f"versionName='{name}'",
-              "sdkVersion": "sdkVersion:'24'",
               "targetSdkVersion": "targetSdkVersion:'36'",
           }
           missing = [key for key, text in expected.items() if text not in badging]
+          # Older aapt2 prints sdkVersion:, newer prints minSdkVersion:.
+          min_sdk = re.search(r"(?m)^(?:min)?[sS]dkVersion:'(\d+)'", badging)
+          if not min_sdk or min_sdk.group(1) != "24":
+              missing.append(f"minSdkVersion ({min_sdk.group(1) if min_sdk else 'not found'})")
           if missing:
               raise SystemExit(f"Unexpected manifest values: {missing}")
           storage = [p for p in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE") if p in badging]
